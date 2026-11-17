@@ -310,10 +310,35 @@ private fun AIClipperApp() {
                                                     endMs = (candidate.endSeconds * 1000L).toLong(),
                                                     transcript = transcript
                                                 )
+                                                val clipMetadata = try {
+                                                    OpenAiClipMetadataEngine(
+                                                        apiKey = apiKey.trim()
+                                                    ).generate(
+                                                        transcriptText = transcript?.segments
+                                                            ?.filter {
+                                                                it.endMs > (candidate.startSeconds * 1000L).toLong() &&
+                                                                        it.startMs < (candidate.endSeconds * 1000L).toLong()
+                                                            }
+                                                            ?.joinToString(" ") { it.text }
+                                                            .orEmpty(),
+                                                        suggestedTitle = candidate.suggestedTitle,
+                                                        hook = candidate.hook,
+                                                        reason = candidate.reason
+                                                    )
+                                                } catch (_: Exception) {
+                                                    ClipMetadata(
+                                                        title = candidate.suggestedTitle,
+                                                        description = candidate.reason,
+                                                        hashtags = emptyList()
+                                                    )
+                                                }
+
                                                 created += GeneratedClip(
                                                     fileName = file.name,
                                                     filePath = file.absolutePath,
-                                                    title = candidate.suggestedTitle,
+                                                    title = clipMetadata.title,
+                                                    description = clipMetadata.description,
+                                                    hashtags = clipMetadata.hashtags,
                                                     score = candidate.score
                                                 )
                                                 generatedClips = created.toList()
@@ -458,6 +483,8 @@ private data class GeneratedClip(
     val fileName: String,
     val filePath: String,
     val title: String,
+    val description: String,
+    val hashtags: List<String>,
     val score: Int
 )
 
@@ -486,6 +513,18 @@ private fun GeneratedClipCard(clip: GeneratedClip) {
                 "Skor " + clip.score + " • " + clip.fileName,
                 style = MaterialTheme.typography.bodySmall
             )
+            if (clip.description.isNotBlank()) {
+                Text(
+                    clip.description,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            if (clip.hashtags.isNotEmpty()) {
+                Text(
+                    clip.hashtags.joinToString(" "),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
             Text(clip.filePath, style = MaterialTheme.typography.labelSmall)
         }
     }
