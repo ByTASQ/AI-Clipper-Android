@@ -72,12 +72,15 @@ private fun AIClipperApp() {
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
+    var analysisState by remember { mutableStateOf<AnalysisState>(AnalysisState.Idle) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         selectedVideo = uri
+        analysisState = AnalysisState.Idle
+        clipRange = 0f..0f
     }
 
     MaterialTheme {
@@ -161,13 +164,28 @@ private fun AIClipperApp() {
                     }
 
                     OutlinedButton(
-                        onClick = { },
-                        enabled = selectedVideo != null,
+                        onClick = {
+                            if (videoDurationMs > 0L) {
+                                analysisState = AnalysisState.Analyzing
+                                analysisState = AnalysisState.Completed(
+                                    analyzeClipCandidates(videoDurationMs)
+                                )
+                            }
+                        },
+                        enabled = selectedVideo != null &&
+                                videoDurationMs > 0L &&
+                                analysisState !is AnalysisState.Analyzing,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null)
                         Spacer(Modifier.padding(3.dp))
-                        Text("AI Analiz")
+                        Text(
+                            if (analysisState is AnalysisState.Analyzing) {
+                                "Analiz ediliyor..."
+                            } else {
+                                "AI Analiz"
+                            }
+                        )
                     }
                 }
 
@@ -183,6 +201,36 @@ private fun AIClipperApp() {
                     )
                 }
  
+                when (val state = analysisState) {
+                    AnalysisState.Idle -> Unit
+                    AnalysisState.Analyzing -> {
+                        Text(
+                            "Video zaman çizelgesi taranıyor...",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                    is AnalysisState.Completed -> {
+                        Text(
+                            "Klip adayları",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        Text(
+                            "Bu aşamadaki sonuçlar otomatik zaman aralığı ön analizidir. Gerçek semantik/viral skor için sonraki aşamada konuşma ve içerik analizi eklenecek.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        state.candidates.forEach { candidate ->
+                            ClipCandidateCard(
+                                candidate = candidate,
+                                onSelect = {
+                                    clipRange = candidate.startSeconds..candidate.endSeconds
+                                    playSelection = true
+                                }
+                            )
+                        }
+                    }
+                }
+
                 if (selectedVideo != null && videoDurationMs > 0L) {
                     Text(
                         text = "Klip aralığı: ${formatTime(clipRange.start)} – ${formatTime(clipRange.endInclusive)}",
@@ -239,6 +287,89 @@ private fun AIClipperApp() {
     }
 }
 
+
+private data class ClipCandidate(
+    val startSeconds: Float,
+    val endSeconds: Float,
+    val score: Int,
+    val reason: String
+)
+
+private sealed interface AnalysisState {
+    data object Idle : AnalysisState
+    data object Analyzing : AnalysisState
+    data class Completed(val candidates: List<ClipCandidate>) : AnalysisState
+}
+
+private fun analyzeClipCandidates(durationMs: Long): List<ClipCandidate> {
+    val duration = durationMs / 1000f
+    if (duration <= 1f) return emptyList()
+
+    val window = when {
+        duration < 20f -> duration.coerceAtLeast(3f)
+        duration < 60f -> 15f
+        duration < 180f -> 30f
+        else -> 45f
+    }.coerceAtMost(duration)
+
+    val maxStart = (duration - window).coerceAtLeast(0f)
+    val starts = listOf(0f, maxStart * 0.5f, maxStart).distinct()
+
+    return starts.mapIndexed { index, start ->
+        val score = when (index) {
+            0 -> 72
+            1 -> 86
+            else -> 78
+        }
+
+        ClipCandidate(
+            startSeconds = start,
+            endSeconds = (start + window).coerceAtMost(duration),
+            score = score,
+            reason = when (index) {
+                0 -> "Videonun başlangıç bölümü"
+                1 -> "Videonun orta bölümü"
+                else -> "Videonun son bölümü"
+            }
+        )
+    }
+}
+
+@Composable
+private fun ClipCandidateCard(
+    candidate: ClipCandidate,
+    onSelect: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "${formatTime(candidate.startSeconds)} – ${formatTime(candidate.endSeconds)}",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "Skor ${candidate.score}",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            Text(candidate.reason, style = MaterialTheme.typography.bodySmall)
+
+            OutlinedButton(
+                onClick = onSelect,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Bu Klipi Seç")
+            }
+        }
+    }
+}
 
 private sealed interface ExportState {
     data object Idle : ExportState
