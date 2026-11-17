@@ -295,14 +295,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                         Text("Video Seç")
                     }
 
-                    OutlinedButton(
-                        onClick = {
-                            sharedYoutubeUrl = "YouTube'dan Paylaş → AI Clipper"
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("YouTube Linki Paylaş")
-                    }
                 }
 
                 if (sharedYoutubeUrl.isNotBlank()) {
