@@ -2,6 +2,7 @@ package com.bytasq.aiclipper
 
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -35,6 +36,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Transformer
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.runtime.Composable
@@ -61,6 +68,7 @@ private fun AIClipperApp() {
     var videoDurationMs by remember { mutableStateOf(0L) }
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
+    var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
 
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -192,12 +200,92 @@ private fun AIClipperApp() {
                     ) {
                         Text("Seçimi Oynat")
                     }
+
+                    Button(
+                        onClick = {
+                            exportSelectedClip(
+                                context = androidx.compose.ui.platform.LocalContext.current,
+                                uri = selectedVideo!!,
+                                startMs = (clipRange.start * 1000L).toLong(),
+                                endMs = (clipRange.endInclusive * 1000L).toLong(),
+                                onStateChanged = { exportState = it }
+                            )
+                        },
+                        enabled = exportState !is ExportState.Exporting && clipRange.endInclusive > clipRange.start,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            when (exportState) {
+                                ExportState.Exporting -> "Klip oluşturuluyor..."
+                                ExportState.Idle, is ExportState.Completed -> "Klibi Dışa Aktar"
+                                is ExportState.Failed -> "Tekrar Dene"
+                            }
+                        )
+                    }
+
+                    when (val state = exportState) {
+                        ExportState.Exporting -> Text("MP4 hazırlanıyor...", style = MaterialTheme.typography.labelMedium)
+                        is ExportState.Completed -> Text("Klip hazır: ${state.fileName}", style = MaterialTheme.typography.labelMedium)
+                        is ExportState.Failed -> Text("Dışa aktarma hatası: ${state.message}", style = MaterialTheme.typography.labelMedium)
+                        ExportState.Idle -> Unit
+                    }
                 }
             }
         }
     }
 }
 
+
+private sealed interface ExportState {
+    data object Idle : ExportState
+    data object Exporting : ExportState
+    data class Completed(val fileName: String) : ExportState
+    data class Failed(val message: String) : ExportState
+}
+
+private fun exportSelectedClip(
+    context: android.content.Context,
+    uri: Uri,
+    startMs: Long,
+    endMs: Long,
+    onStateChanged: (ExportState) -> Unit
+) {
+    if (endMs <= startMs) return
+    onStateChanged(ExportState.Exporting)
+
+    val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
+    val outputFile = File(outputDir, "AIClipper_${System.currentTimeMillis()}.mp4")
+
+    val clipping = MediaItem.ClippingConfiguration.Builder()
+        .setStartPositionMs(startMs)
+        .setEndPositionMs(endMs)
+        .build()
+    val mediaItem = MediaItem.Builder()
+        .setUri(uri)
+        .setClippingConfiguration(clipping)
+        .build()
+    val editedMediaItem = EditedMediaItem.Builder(mediaItem).build()
+
+    val transformer = Transformer.Builder(context)
+        .setVideoMimeType(MimeTypes.VIDEO_H264)
+        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+        .addListener(object : Transformer.Listener {
+            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                android.media.MediaScannerConnection.scanFile(
+                    context, arrayOf(outputFile.absolutePath), arrayOf("video/mp4"), null
+                )
+                onStateChanged(ExportState.Completed(outputFile.name))
+            }
+
+            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+                outputFile.delete()
+                onStateChanged(ExportState.Failed(exportException.message ?: "Bilinmeyen dışa aktarma hatası"))
+            }
+        })
+        .build()
+
+    transformer.start(editedMediaItem, outputFile.absolutePath)
+}
 
 @Composable
 private fun VideoPreview(
