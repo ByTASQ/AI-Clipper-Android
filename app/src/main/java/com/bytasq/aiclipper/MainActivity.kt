@@ -62,6 +62,9 @@ import kotlinx.coroutines.delay
 import java.io.File
 import kotlin.math.max
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +85,8 @@ private fun AIClipperApp() {
     var transcriptText by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf<Transcript?>(null) }
     var analysisError by remember { mutableStateOf<String?>(null) }
+    var generatedClips by remember { mutableStateOf<List<GeneratedClip>>(emptyList()) }
+    var batchExportState by remember { mutableStateOf<BatchExportState>(BatchExportState.Idle) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -94,6 +99,8 @@ private fun AIClipperApp() {
         transcript = null
         analysisError = null
         clipRange = 0f..0f
+        generatedClips = emptyList()
+        batchExportState = BatchExportState.Idle
     }
 
     MaterialTheme {
@@ -283,6 +290,91 @@ private fun AIClipperApp() {
                             style = MaterialTheme.typography.bodySmall
                         )
 
+                        Button(
+                            onClick = {
+                                if (batchExportState !is BatchExportState.Exporting) {
+                                    scope.launch {
+                                        batchExportState = BatchExportState.Exporting(
+                                            current = 0,
+                                            total = state.candidates.size
+                                        )
+                                        generatedClips = emptyList()
+
+                                        val created = mutableListOf<GeneratedClip>()
+                                        state.candidates.forEachIndexed { index, candidate ->
+                                            try {
+                                                val file = exportClip(
+                                                    context = context,
+                                                    uri = selectedVideo!!,
+                                                    startMs = (candidate.startSeconds * 1000L).toLong(),
+                                                    endMs = (candidate.endSeconds * 1000L).toLong(),
+                                                    transcript = transcript
+                                                )
+                                                created += GeneratedClip(
+                                                    fileName = file.name,
+                                                    filePath = file.absolutePath,
+                                                    title = candidate.suggestedTitle,
+                                                    score = candidate.score
+                                                )
+                                                generatedClips = created.toList()
+                                                batchExportState = BatchExportState.Exporting(
+                                                    current = index + 1,
+                                                    total = state.candidates.size
+                                                )
+                                            } catch (e: Exception) {
+                                                batchExportState = BatchExportState.Failed(
+                                                    "Klip " + (index + 1) + " oluşturulamadı: " +
+                                                            (e.message ?: "Bilinmeyen hata")
+                                                )
+                                                return@launch
+                                            }
+                                        }
+
+                                        batchExportState = BatchExportState.Completed(created.size)
+                                    }
+                                }
+                            },
+                            enabled = state.candidates.isNotEmpty() &&
+                                    selectedVideo != null &&
+                                    batchExportState !is BatchExportState.Exporting,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                when (batchExportState) {
+                                    BatchExportState.Idle,
+                                    is BatchExportState.Completed,
+                                    is BatchExportState.Failed -> "AI Kliplerinin Tümünü Oluştur"
+                                    is BatchExportState.Exporting -> "Klipler oluşturuluyor..."
+                                }
+                            )
+                        }
+
+                        when (val batch = batchExportState) {
+                            is BatchExportState.Exporting -> {
+                                Text(
+                                    "Klip " + batch.current + "/" + batch.total + " hazırlanıyor...",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                            is BatchExportState.Completed -> {
+                                Text(
+                                    batch.count.toString() + " klip hazır.",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                            is BatchExportState.Failed -> {
+                                Text(
+                                    batch.message,
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                            BatchExportState.Idle -> Unit
+                        }
+
+                        generatedClips.forEach { clip ->
+                            GeneratedClipCard(clip)
+                        }
+
                         state.candidates.forEach { candidate ->
                             ClipCandidateCard(
                                 candidate = candidate,
@@ -362,10 +454,41 @@ private data class ClipCandidate(
     val suggestedTitle: String
 )
 
+private data class GeneratedClip(
+    val fileName: String,
+    val filePath: String,
+    val title: String,
+    val score: Int
+)
+
+private sealed interface BatchExportState {
+    data object Idle : BatchExportState
+    data class Exporting(val current: Int, val total: Int) : BatchExportState
+    data class Completed(val count: Int) : BatchExportState
+    data class Failed(val message: String) : BatchExportState
+}
+
 private sealed interface AnalysisState {
     data object Idle : AnalysisState
     data object Analyzing : AnalysisState
     data class Completed(val candidates: List<ClipCandidate>) : AnalysisState
+}
+
+@Composable
+private fun GeneratedClipCard(clip: GeneratedClip) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(clip.title, style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Skor " + clip.score + " • " + clip.fileName,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(clip.filePath, style = MaterialTheme.typography.labelSmall)
+        }
+    }
 }
 
 @Composable
@@ -424,19 +547,25 @@ private sealed interface ExportState {
 }
 
 @OptIn(UnstableApi::class)
-private fun exportSelectedClip(
+private suspend fun exportClip(
     context: android.content.Context,
     uri: Uri,
     startMs: Long,
     endMs: Long,
-    transcript: Transcript?,
-    onStateChanged: (ExportState) -> Unit
-) {
-    if (endMs <= startMs) return
-    onStateChanged(ExportState.Exporting)
+    transcript: Transcript?
+): File = suspendCancellableCoroutine { continuation ->
+    if (endMs <= startMs) {
+        continuation.resumeWithException(IllegalArgumentException("Geçersiz klip aralığı."))
+        return@suspendCancellableCoroutine
+    }
 
     val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
-    val outputFile = File(outputDir, "AIClipper_${System.currentTimeMillis()}.mp4")
+    if (!outputDir.exists() && !outputDir.mkdirs()) {
+        continuation.resumeWithException(IllegalStateException("Çıkış klasörü oluşturulamadı."))
+        return@suspendCancellableCoroutine
+    }
+
+    val outputFile = File(outputDir, "AIClipper_" + System.currentTimeMillis() + "_" + startMs + ".mp4")
 
     val clipping = MediaItem.ClippingConfiguration.Builder()
         .setStartPositionMs(startMs)
@@ -446,6 +575,7 @@ private fun exportSelectedClip(
         .setUri(uri)
         .setClippingConfiguration(clipping)
         .build()
+
     val presentation = Presentation.createForAspectRatio(
         9f / 16f,
         Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
@@ -472,19 +602,36 @@ private fun exportSelectedClip(
         .setVideoMimeType(MimeTypes.VIDEO_H264)
         .setAudioMimeType(MimeTypes.AUDIO_AAC)
         .addListener(object : Transformer.Listener {
-            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+            override fun onCompleted(
+                composition: Composition,
+                exportResult: ExportResult
+            ) {
                 android.media.MediaScannerConnection.scanFile(
-                    context, arrayOf(outputFile.absolutePath), arrayOf("video/mp4"), null
+                    context,
+                    arrayOf(outputFile.absolutePath),
+                    arrayOf("video/mp4"),
+                    null
                 )
-                onStateChanged(ExportState.Completed(outputFile.name))
+                if (continuation.isActive) continuation.resume(outputFile)
             }
 
-            override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
+            override fun onError(
+                composition: Composition,
+                exportResult: ExportResult,
+                exportException: ExportException
+            ) {
                 outputFile.delete()
-                onStateChanged(ExportState.Failed(exportException.message ?: "Bilinmeyen dışa aktarma hatası"))
+                if (continuation.isActive) {
+                    continuation.resumeWithException(exportException)
+                }
             }
         })
         .build()
+
+    continuation.invokeOnCancellation {
+        transformer.cancel()
+        outputFile.delete()
+    }
 
     transformer.start(editedMediaItem, outputFile.absolutePath)
 }
