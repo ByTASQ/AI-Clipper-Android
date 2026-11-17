@@ -2,7 +2,7 @@ package com.bytasq.aiclipper
 
 import android.content.Context
 import android.os.Environment
-import com.yausername.youtubedl_android.FFmpeg
+import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLException
 import com.yausername.youtubedl_android.YoutubeDLRequest
