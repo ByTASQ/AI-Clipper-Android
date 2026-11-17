@@ -27,6 +27,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,26 +82,20 @@ private fun AIClipperApp() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(220.dp)
+                        .height(240.dp)
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
+                    if (selectedVideo != null) {
+                        VideoPreview(selectedVideo!!)
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.VideoLibrary,
-                                contentDescription = null
-                            )
-
-                            Spacer(Modifier.height(10.dp))
-
-                            Text(
-                                text = selectedVideo?.lastPathSegment
-                                    ?: "Henüz video seçilmedi"
-                            )
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Default.VideoLibrary, contentDescription = null)
+                                Spacer(Modifier.height(10.dp))
+                                Text("Henüz video seçilmedi")
+                            }
                         }
                     }
                 }
@@ -128,14 +127,36 @@ private fun AIClipperApp() {
                 }
 
                 Text(
-                    text = if (selectedVideo == null) {
-                        "Video seçildiğinde sonraki adım önizleme olacak."
-                    } else {
-                        "Video seçildi. Önizleme ekranına geçebiliriz."
-                    },
+                    text = selectedVideo?.lastPathSegment ?: "Video seçerek önizlemeyi başlat.",
                     style = MaterialTheme.typography.labelMedium
                 )
             }
         }
     }
+}
+
+@Composable
+private fun VideoPreview(uri: Uri) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(uri) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(uri))
+            prepare()
+            playWhenReady = false
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    AndroidView(
+        factory = {
+            PlayerView(it).apply {
+                this.player = player
+                useController = true
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
 }
