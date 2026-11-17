@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
@@ -31,6 +33,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.DisposableEffect
@@ -89,6 +92,21 @@ private fun AIClipperApp() {
     var batchExportState by remember { mutableStateOf<BatchExportState>(BatchExportState.Idle) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val youtubePublisher = remember(context) { YouTubePublisher(context) }
+    var youtubeAccount by remember { mutableStateOf<YouTubeAccount?>(youtubePublisher.lastSignedInAccount()) }
+    var youtubeStatus by remember { mutableStateOf<String?>(null) }
+    var approvalClip by remember { mutableStateOf<GeneratedClip?>(null) }
+    var uploadingClipPath by remember { mutableStateOf<String?>(null) }
+    var publishedVideoIds by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    val youtubeLauncher = rememberLauncherForActivityResult(StartActivityForResult()) { result ->
+        try {
+            youtubeAccount = youtubePublisher.accountFromResult(result.data)
+            youtubeStatus = "YouTube hesabı bağlandı."
+        } catch (e: Exception) {
+            youtubeStatus = "YouTube bağlantısı başarısız: " + (e.message ?: "Bilinmeyen hata")
+        }
+    }
 
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -121,6 +139,32 @@ private fun AIClipperApp() {
                 )
 
                 Text(text = "Video → konuşma → analiz → klip.", style = MaterialTheme.typography.bodyMedium)
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("YouTube Yayınlama", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            youtubeAccount?.email?.let { "Bağlı hesap: $it" } ?: "YouTube hesabı bağlı değil.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Button(
+                            onClick = { youtubeLauncher.launch(youtubePublisher.signInIntent()) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (youtubeAccount == null) "YouTube Hesabını Bağla" else "YouTube Hesabını Değiştir")
+                        }
+                        Text(
+                            "Klipler otomatik yüklenmez; önce videoyu bir kez izleyip onaylaman gerekir.",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        youtubeStatus?.let {
+                            Text(it, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
 
                 TextField(
                     value = apiKey,
@@ -397,7 +441,17 @@ private fun AIClipperApp() {
                         }
 
                         generatedClips.forEach { clip ->
-                            GeneratedClipCard(clip)
+                            GeneratedClipCard(
+                                clip = clip,
+                                publishedVideoId = publishedVideoIds[clip.filePath],
+                                onRequestApproval = {
+                                    if (youtubeAccount == null) {
+                                        youtubeStatus = "Önce YouTube hesabını bağla."
+                                    } else {
+                                        approvalClip = clip
+                                    }
+                                }
+                            )
                         }
 
                         state.candidates.forEach { candidate ->
@@ -467,6 +521,39 @@ private fun AIClipperApp() {
             }
         }
     }
+
+    approvalClip?.let { clip ->
+        YouTubeApprovalDialog(
+            clip = clip,
+            isUploading = uploadingClipPath == clip.filePath,
+            uploadStatus = youtubeStatus,
+            onDismiss = { approvalClip = null },
+            onApprove = {
+                uploadingClipPath = clip.filePath
+                youtubeStatus = "YouTube'a yükleniyor..."
+                scope.launch {
+                    try {
+                        val videoId = youtubePublisher.uploadVideo(
+                            File(clip.filePath),
+                            YouTubeUploadMetadata(
+                                title = clip.title,
+                                description = clip.description,
+                                hashtags = clip.hashtags,
+                                privacyStatus = "private"
+                            )
+                        )
+                        publishedVideoIds = publishedVideoIds + (clip.filePath to videoId)
+                        youtubeStatus = "✓ YouTube'a yayınlandı: https://youtu.be/$videoId"
+                        uploadingClipPath = null
+                        approvalClip = null
+                    } catch (e: Exception) {
+                        uploadingClipPath = null
+                        youtubeStatus = "YouTube yükleme hatası: " + (e.message ?: "Bilinmeyen hata")
+                    }
+                }
+            }
+        )
+    }
 }
 
 
@@ -502,7 +589,11 @@ private sealed interface AnalysisState {
 }
 
 @Composable
-private fun GeneratedClipCard(clip: GeneratedClip) {
+private fun GeneratedClipCard(
+    clip: GeneratedClip,
+    publishedVideoId: String?,
+    onRequestApproval: () -> Unit
+) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -526,8 +617,113 @@ private fun GeneratedClipCard(clip: GeneratedClip) {
                 )
             }
             Text(clip.filePath, style = MaterialTheme.typography.labelSmall)
+
+            if (publishedVideoId != null) {
+                Text(
+                    "YouTube'a yayınlandı: https://youtu.be/$publishedVideoId",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            } else {
+                Button(
+                    onClick = onRequestApproval,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Videoyu İzle ve Yayınlamayı Onayla")
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun YouTubeApprovalDialog(
+    clip: GeneratedClip,
+    isUploading: Boolean,
+    uploadStatus: String?,
+    onDismiss: () -> Unit,
+    onApprove: () -> Unit
+) {
+    var watchedOnce by remember(clip.filePath) { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = { if (!isUploading) onDismiss() },
+        title = { Text("YouTube Yayın Onayı") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(clip.title, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Yayınlamadan önce klibi bir kez izlemen gerekiyor.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                GeneratedClipVideoPreview(
+                    filePath = clip.filePath,
+                    onPlaybackCompleted = { watchedOnce = true }
+                )
+                Text(
+                    if (watchedOnce) "✓ Video izlendi. Yayınlama onayı verebilirsin."
+                    else "Video henüz tamamlanmadı.",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                uploadStatus?.let { Text(it, style = MaterialTheme.typography.labelMedium) }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onApprove,
+                enabled = watchedOnce && !isUploading
+            ) {
+                Text(if (isUploading) "YouTube'a yükleniyor..." else "✓ Yayınla")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isUploading) {
+                Text("Vazgeç")
+            }
+        }
+    )
+}
+
+@Composable
+private fun GeneratedClipVideoPreview(
+    filePath: String,
+    onPlaybackCompleted: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(filePath) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(Uri.fromFile(File(filePath))))
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(player) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                    onPlaybackCompleted()
+                }
+            }
+        }
+        player.addListener(listener)
+        onDispose {
+            player.removeListener(listener)
+            player.release()
+        }
+    }
+
+    AndroidView(
+        factory = {
+            PlayerView(it).apply {
+                this.player = player
+                useController = true
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            }
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(280.dp)
+    )
 }
 
 @Composable
