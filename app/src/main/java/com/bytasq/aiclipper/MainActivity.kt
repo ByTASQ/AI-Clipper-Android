@@ -181,10 +181,31 @@ private fun AIClipperApp() {
                     OutlinedButton(
                         onClick = {
                             if (videoDurationMs > 0L) {
-                                analysisState = AnalysisState.Analyzing
-                                analysisState = AnalysisState.Completed(
-                                    analyzeClipCandidates(videoDurationMs)
-                                )
+                                scope.launch {
+                                    analysisState = AnalysisState.Analyzing
+                                    analysisError = null
+                                    try {
+                                        val transcript = OpenAiTranscriptionEngine(
+                                            context = context,
+                                            apiKey = apiKey.trim()
+                                        ).transcribe(selectedVideo!!)
+                                        transcriptText = transcript.fullText
+                                        val result = LocalClipAnalysisEngine().analyze(transcript)
+                                        analysisState = AnalysisState.Completed(
+                                            result.candidates.map {
+                                                ClipCandidate(
+                                                    startSeconds = it.startMs / 1000f,
+                                                    endSeconds = it.endMs / 1000f,
+                                                    score = it.score,
+                                                    reason = it.reason
+                                                )
+                                            }
+                                        )
+                                    } catch (e: Exception) {
+                                        analysisState = AnalysisState.Idle
+                                        analysisError = e.message ?: "Analiz sırasında hata oluştu."
+                                    }
+                                }
                             }
                         },
                         enabled = selectedVideo != null &&
