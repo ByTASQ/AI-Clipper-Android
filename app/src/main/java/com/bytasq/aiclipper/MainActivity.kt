@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -79,22 +80,33 @@ private fun AIClipperApp() {
                     style = MaterialTheme.typography.bodyMedium
                 )
 
-                Card(
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(240.dp)
+                        .height(420.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    if (selectedVideo != null) {
-                        VideoPreview(selectedVideo!!)
-                    } else {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(Icons.Default.VideoLibrary, contentDescription = null)
-                                Spacer(Modifier.height(10.dp))
-                                Text("Henüz video seçilmedi")
+                    Card(
+                        modifier = Modifier
+                            .height(420.dp)
+                            .aspectRatio(9f / 16f)
+                    ) {
+                        if (selectedVideo != null) {
+                            VideoPreview(selectedVideo!!)
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Icon(Icons.Default.VideoLibrary, contentDescription = null)
+                                    Spacer(Modifier.height(10.dp))
+                                    Text("Henüz video seçilmedi")
+                                    Text(
+                                        "9:16 Shorts önizleme",
+                                        style = MaterialTheme.typography.labelMedium
+                                    )
+                                }
                             }
                         }
                     }
@@ -130,6 +142,13 @@ private fun AIClipperApp() {
                     text = selectedVideo?.lastPathSegment ?: "Video seçerek önizlemeyi başlat.",
                     style = MaterialTheme.typography.labelMedium
                 )
+
+                if (selectedVideo != null) {
+                    Text(
+                        text = "Çıkış formatı: 9:16 • Shorts / Reels / TikTok",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
             }
         }
     }
@@ -155,6 +174,7 @@ private fun VideoPreview(uri: Uri) {
             PlayerView(it).apply {
                 this.player = player
                 useController = true
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             }
         },
         modifier = Modifier.fillMaxSize()
