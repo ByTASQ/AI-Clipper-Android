@@ -539,7 +539,7 @@ private fun AIClipperApp() {
                                 title = clip.title,
                                 description = clip.description,
                                 hashtags = clip.hashtags,
-                                privacyStatus = "private"
+                                privacyStatus = "public"
                             )
                         )
                         publishedVideoIds = publishedVideoIds + (clip.filePath to videoId)
