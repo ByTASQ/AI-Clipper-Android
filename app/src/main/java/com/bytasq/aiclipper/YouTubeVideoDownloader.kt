@@ -2,10 +2,10 @@ package com.bytasq.aiclipper
 
 import android.content.Context
 import android.os.Environment
-import com.yausername.youtubedl_android.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLException
-import com.yausername.youtubedl_android.YoutubeDLRequest
+import io.github.junkfood02.youtubedl_android.FFmpeg
+import io.github.junkfood02.youtubedl_android.YoutubeDL
+import io.github.junkfood02.youtubedl_android.YoutubeDLException
+import io.github.junkfood02.youtubedl_android.YoutubeDLRequest
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
