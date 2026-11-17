@@ -190,14 +190,19 @@ private fun AIClipperApp() {
                                             apiKey = apiKey.trim()
                                         ).transcribe(selectedVideo!!)
                                         transcriptText = transcript.fullText
-                                        val result = LocalClipAnalysisEngine().analyze(transcript)
+                                        val result = OpenAiClipAnalysisEngine(
+                                            apiKey = apiKey.trim()
+                                        ).analyze(transcript)
+
                                         analysisState = AnalysisState.Completed(
                                             result.candidates.map {
                                                 ClipCandidate(
                                                     startSeconds = it.startMs / 1000f,
                                                     endSeconds = it.endMs / 1000f,
                                                     score = it.score,
-                                                    reason = it.reason
+                                                    hook = it.hook,
+                                                    reason = it.reason,
+                                                    suggestedTitle = it.suggestedTitle
                                                 )
                                             }
                                         )
@@ -259,7 +264,7 @@ private fun AIClipperApp() {
                     AnalysisState.Idle -> Unit
                     AnalysisState.Analyzing -> {
                         Text(
-                            "Video zaman çizelgesi taranıyor...",
+                            "Transkript çıkarıldı. AI, güçlü klipleri seçiyor...",
                             style = MaterialTheme.typography.labelMedium
                         )
                     }
@@ -269,7 +274,7 @@ private fun AIClipperApp() {
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            "Bu aşamadaki sonuçlar otomatik zaman aralığı ön analizidir. Gerçek semantik/viral skor için sonraki aşamada konuşma ve içerik analizi eklenecek.",
+                            "AI; hook, bilgi değeri, merak, duygu ve izlenme potansiyeline göre semantik seçim yaptı.",
                             style = MaterialTheme.typography.bodySmall
                         )
 
@@ -346,47 +351,15 @@ private data class ClipCandidate(
     val startSeconds: Float,
     val endSeconds: Float,
     val score: Int,
-    val reason: String
+    val hook: String,
+    val reason: String,
+    val suggestedTitle: String
 )
 
 private sealed interface AnalysisState {
     data object Idle : AnalysisState
     data object Analyzing : AnalysisState
     data class Completed(val candidates: List<ClipCandidate>) : AnalysisState
-}
-
-private fun analyzeClipCandidates(durationMs: Long): List<ClipCandidate> {
-    val duration = durationMs / 1000f
-    if (duration <= 1f) return emptyList()
-
-    val window = when {
-        duration < 20f -> duration.coerceAtLeast(3f)
-        duration < 60f -> 15f
-        duration < 180f -> 30f
-        else -> 45f
-    }.coerceAtMost(duration)
-
-    val maxStart = (duration - window).coerceAtLeast(0f)
-    val starts = listOf(0f, maxStart * 0.5f, maxStart).distinct()
-
-    return starts.mapIndexed { index, start ->
-        val score = when (index) {
-            0 -> 72
-            1 -> 86
-            else -> 78
-        }
-
-        ClipCandidate(
-            startSeconds = start,
-            endSeconds = (start + window).coerceAtMost(duration),
-            score = score,
-            reason = when (index) {
-                0 -> "Videonun başlangıç bölümü"
-                1 -> "Videonun orta bölümü"
-                else -> "Videonun son bölümü"
-            }
-        )
-    }
 }
 
 @Composable
@@ -410,6 +383,18 @@ private fun ClipCandidateCard(
                 Text(
                     "Skor ${candidate.score}",
                     style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            Text(
+                candidate.suggestedTitle,
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            if (candidate.hook.isNotBlank()) {
+                Text(
+                    "Hook: ${candidate.hook}",
+                    style = MaterialTheme.typography.bodySmall
                 )
             }
 
