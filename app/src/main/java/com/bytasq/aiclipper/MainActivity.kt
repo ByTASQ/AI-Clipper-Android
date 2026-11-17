@@ -3,6 +3,15 @@ package com.bytasq.aiclipper
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,7 +96,8 @@ private fun AIClipperApp() {
     var playSelection by remember { mutableStateOf(false) }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
     var analysisState by remember { mutableStateOf<AnalysisState>(AnalysisState.Idle) }
-    var apiKey by remember { mutableStateOf("") }
+    var apiKey by remember(context) { mutableStateOf(loadOpenAiApiKey(context)) }
+    var apiKeySaved by remember { mutableStateOf(false) }
     var transcriptText by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf<Transcript?>(null) }
     var analysisError by remember { mutableStateOf<String?>(null) }
@@ -171,12 +181,40 @@ private fun AIClipperApp() {
 
                 TextField(
                     value = apiKey,
-                    onValueChange = { apiKey = it; analysisError = null },
+                    onValueChange = {
+                        apiKey = it
+                        apiKeySaved = false
+                        analysisError = null
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("OpenAI API anahtarı") },
                     placeholder = { Text("sk-...") },
                     singleLine = true
                 )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            saveOpenAiApiKey(context, apiKey.trim())
+                            apiKeySaved = true
+                        },
+                        enabled = apiKey.trim().isNotEmpty(),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("API Anahtarını Kaydet")
+                    }
+
+                    if (apiKeySaved) {
+                        Text(
+                            "✓ Kaydedildi",
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.align(Alignment.CenterVertically)
+                        )
+                    }
+                }
 
                 Box(
                     modifier = Modifier
@@ -559,6 +597,73 @@ private fun AIClipperApp() {
     }
 }
 
+
+private const val OPENAI_KEY_ALIAS = "AIClipperOpenAIKey"
+private const val OPENAI_PREFS = "ai_clipper_secure_prefs"
+private const val OPENAI_PREF_KEY = "openai_api_key"
+
+private fun getOpenAiSecretKey(): SecretKey {
+    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    val existing = keyStore.getKey(OPENAI_KEY_ALIAS, null) as? SecretKey
+    if (existing != null) return existing
+
+    val generator = KeyGenerator.getInstance(
+        KeyProperties.KEY_ALGORITHM_AES,
+        "AndroidKeyStore"
+    )
+    generator.init(
+        KeyGenParameterSpec.Builder(
+            OPENAI_KEY_ALIAS,
+            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        )
+            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+            .build()
+    )
+    return generator.generateKey()
+}
+
+private fun saveOpenAiApiKey(context: Context, apiKey: String) {
+    if (apiKey.isBlank()) return
+
+    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, getOpenAiSecretKey())
+    val encrypted = cipher.doFinal(apiKey.toByteArray(Charsets.UTF_8))
+    val combined = cipher.iv + encrypted
+
+    context.getSharedPreferences(OPENAI_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(
+            OPENAI_PREF_KEY,
+            Base64.encodeToString(combined, Base64.NO_WRAP)
+        )
+        .apply()
+}
+
+private fun loadOpenAiApiKey(context: Context): String {
+    return try {
+        val stored = context.getSharedPreferences(OPENAI_PREFS, Context.MODE_PRIVATE)
+            .getString(OPENAI_PREF_KEY, null)
+            ?: return ""
+
+        val combined = Base64.decode(stored, Base64.NO_WRAP)
+        if (combined.size <= 12) return ""
+
+        val iv = combined.copyOfRange(0, 12)
+        val encrypted = combined.copyOfRange(12, combined.size)
+
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.DECRYPT_MODE,
+            getOpenAiSecretKey(),
+            GCMParameterSpec(128, iv)
+        )
+
+        String(cipher.doFinal(encrypted), Charsets.UTF_8)
+    } catch (_: Exception) {
+        ""
+    }
+}
 
 private data class ClipCandidate(
     val startSeconds: Float,
