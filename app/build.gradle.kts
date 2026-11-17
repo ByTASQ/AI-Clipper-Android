@@ -8,6 +8,15 @@ android {
     namespace = "com.bytasq.aiclipper"
     compileSdk = 35
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     signingConfigs {
         create("release") {
             val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
@@ -24,15 +33,6 @@ android {
         applicationId = "com.bytasq.aiclipper"
         minSdk = 26
         targetSdk = 35
-
-        compileOptions {
-            sourceCompatibility = JavaVersion.VERSION_17
-            targetCompatibility = JavaVersion.VERSION_17
-        }
-
-        kotlinOptions {
-            jvmTarget = "17"
-        }
 
         versionCode = 1
         versionName = "0.1.0"
