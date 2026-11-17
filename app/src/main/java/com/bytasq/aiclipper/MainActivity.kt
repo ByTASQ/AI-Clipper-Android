@@ -237,6 +237,24 @@ private fun AIClipperApp() {
                     )
                 }
  
+                analysisError?.let {
+                    Text(
+                        text = "Analiz hatası: $it",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                if (transcriptText.isNotBlank()) {
+                    Text(
+                        text = "Transkript",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = transcriptText,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
                 when (val state = analysisState) {
                     AnalysisState.Idle -> Unit
                     AnalysisState.Analyzing -> {
