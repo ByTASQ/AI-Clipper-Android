@@ -1,1 +1,173 @@
-package com.bytasq.aiclipper\n\nimport android.content.Context\nimport android.content.Intent\nimport com.google.android.gms.auth.GoogleAuthUtil\nimport com.google.android.gms.auth.api.signin.GoogleSignIn\nimport com.google.android.gms.auth.api.signin.GoogleSignInAccount\nimport com.google.android.gms.auth.api.signin.GoogleSignInOptions\nimport com.google.android.gms.common.api.ApiException\nimport com.google.android.gms.common.api.Scope\nimport kotlinx.coroutines.Dispatchers\nimport kotlinx.coroutines.withContext\nimport okhttp3.MediaType.Companion.toMediaType\nimport okhttp3.OkHttpClient\nimport okhttp3.Request\nimport okhttp3.RequestBody.Companion.asRequestBody\nimport org.json.JSONObject\nimport java.io.File\nimport java.io.IOException\n\ndata class YouTubeUploadMetadata(\n    val title: String,\n    val description: String,\n    val hashtags: List<String>,\n    val privacyStatus: String = "private"\n)\n\ndata class YouTubeAccount(\n    val email: String\n)\n\nclass YouTubePublisher(\n    private val context: Context,\n    private val client: OkHttpClient = OkHttpClient()\n) {\n    companion object {\n        const val UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"\n        private const val UPLOAD_URL =\n            "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status"\n    }\n\n    fun signInIntent(): Intent {\n        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)\n            .requestEmail()\n            .requestScopes(Scope(UPLOAD_SCOPE))\n            .build()\n        return GoogleSignIn.getClient(context, options).signInIntent\n    }\n\n    fun accountFromResult(data: Intent?): YouTubeAccount {\n        val account = GoogleSignIn.getSignedInAccountFromIntent(data)\n            .getResult(ApiException::class.java)\n        return YouTubeAccount(account.email.orEmpty())\n    }\n\n    fun lastSignedInAccount(): YouTubeAccount? {\n        val account = GoogleSignIn.getLastSignedInAccount(context) ?: return null\n        return YouTubeAccount(account.email.orEmpty())\n    }\n\n    suspend fun uploadVideo(\n        file: File,\n        metadata: YouTubeUploadMetadata\n    ): String = withContext(Dispatchers.IO) {\n        val account = GoogleSignIn.getLastSignedInAccount(context)\n            ?: throw IllegalStateException("YouTube hesabı bağlı değil.")\n        uploadWithFreshToken(account, file, metadata)\n    }\n\n    private fun uploadWithFreshToken(\n        account: GoogleSignInAccount,\n        file: File,\n        metadata: YouTubeUploadMetadata\n    ): String {\n        val token = GoogleAuthUtil.getToken(\n            context,\n            account.account,\n            "oauth2:" + UPLOAD_SCOPE\n        )\n        try {\n            return performResumableUpload(token, file, metadata)\n        } catch (e: IOException) {\n            if (!e.message.orEmpty().contains("HTTP 401")) throw e\n            GoogleAuthUtil.clearToken(context, token)\n            val refreshedToken = GoogleAuthUtil.getToken(\n                context,\n                account.account,\n                "oauth2:" + UPLOAD_SCOPE\n            )\n            return performResumableUpload(refreshedToken, file, metadata)\n        }\n    }\n\n    private fun performResumableUpload(\n        accessToken: String,\n        file: File,\n        metadata: YouTubeUploadMetadata\n    ): String {\n        if (!file.exists() || file.length() == 0L) {\n            throw IllegalArgumentException("Yüklenecek MP4 bulunamadı.")\n        }\n\n        val snippet = JSONObject().apply {\n            put("title", metadata.title.take(100))\n            put(\n                "description",\n                buildString {\n                    append(metadata.description.take(4500))\n                    if (metadata.hashtags.isNotEmpty()) {\n                        append("\n\n")\n                        append(metadata.hashtags.joinToString(" "))\n                    }\n                }.take(5000)\n            )\n            put("categoryId", "22")\n        }\n\n        val status = JSONObject().apply {\n            put("privacyStatus", metadata.privacyStatus)\n            put("selfDeclaredMadeForKids", false)\n        }\n\n        val body = JSONObject().apply {\n            put("snippet", snippet)\n            put("status", status)\n        }.toString()\n\n        val sessionRequest = Request.Builder()\n            .url(UPLOAD_URL)\n            .header("Authorization", "Bearer " + accessToken)\n            .header("X-Upload-Content-Type", "video/mp4")\n            .header("X-Upload-Content-Length", file.length().toString())\n            .post(okhttp3.RequestBody.create("application/json".toMediaType(), body))\n            .build()\n\n        client.newCall(sessionRequest).execute().use { response ->\n            if (!response.isSuccessful) {\n                throw IOException(\n                    "YouTube yükleme oturumu başlatılamadı. HTTP " +\n                            response.code + ": " + response.body?.string()\n                )\n            }\n\n            val uploadUrl = response.header("Location")\n                ?: throw IOException("YouTube yükleme adresi alınamadı.")\n\n            val uploadRequest = Request.Builder()\n                .url(uploadUrl)\n                .header("Authorization", "Bearer " + accessToken)\n                .put(file.asRequestBody("video/mp4".toMediaType()))\n                .build()\n\n            client.newCall(uploadRequest).execute().use { uploadResponse ->\n                val responseBody = uploadResponse.body?.string().orEmpty()\n                if (!uploadResponse.isSuccessful) {\n                    throw IOException(\n                        "YouTube video yüklenemedi. HTTP " +\n                                uploadResponse.code + ": " + responseBody\n                    )\n                }\n\n                val videoId = JSONObject(responseBody).optString("id")\n                if (videoId.isBlank()) {\n                    throw IOException("YouTube video ID alınamadı.")\n                }\n                return videoId\n            }\n        }\n    }\n}\n
+package com.bytasq.aiclipper
+
+import android.content.Context
+import android.content.Intent
+import com.google.android.gms.auth.GoogleAuthUtil
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+
+data class YouTubeUploadMetadata(
+    val title: String,
+    val description: String,
+    val hashtags: List<String>,
+    val privacyStatus: String = "private"
+)
+
+data class YouTubeAccount(
+    val email: String
+)
+
+class YouTubePublisher(
+    private val context: Context,
+    private val client: OkHttpClient = OkHttpClient()
+) {
+    companion object {
+        const val UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+        private const val UPLOAD_URL =
+            "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status"
+    }
+
+    fun signInIntent(): Intent {
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(UPLOAD_SCOPE))
+            .build()
+        return GoogleSignIn.getClient(context, options).signInIntent
+    }
+
+    fun accountFromResult(data: Intent?): YouTubeAccount {
+        val account = GoogleSignIn.getSignedInAccountFromIntent(data)
+            .getResult(ApiException::class.java)
+        return YouTubeAccount(account.email.orEmpty())
+    }
+
+    fun lastSignedInAccount(): YouTubeAccount? {
+        val account = GoogleSignIn.getLastSignedInAccount(context) ?: return null
+        return YouTubeAccount(account.email.orEmpty())
+    }
+
+    suspend fun uploadVideo(
+        file: File,
+        metadata: YouTubeUploadMetadata
+    ): String = withContext(Dispatchers.IO) {
+        val account = GoogleSignIn.getLastSignedInAccount(context)
+            ?: throw IllegalStateException("YouTube hesabı bağlı değil.")
+        uploadWithFreshToken(account, file, metadata)
+    }
+
+    private fun uploadWithFreshToken(
+        account: GoogleSignInAccount,
+        file: File,
+        metadata: YouTubeUploadMetadata
+    ): String {
+        val googleAccount = account.account
+            ?: throw IllegalStateException("Google hesabı için Account bilgisi alınamadı.")
+        val token = GoogleAuthUtil.getToken(
+            context,
+            googleAccount,
+            "oauth2:" + UPLOAD_SCOPE
+        )
+
+        try {
+            return performResumableUpload(token, file, metadata)
+        } catch (e: IOException) {
+            if (!e.message.orEmpty().contains("HTTP 401")) throw e
+            GoogleAuthUtil.clearToken(context, token)
+            val refreshedToken = GoogleAuthUtil.getToken(
+                context,
+                googleAccount,
+                "oauth2:" + UPLOAD_SCOPE
+            )
+            return performResumableUpload(refreshedToken, file, metadata)
+        }
+    }
+
+    private fun performResumableUpload(
+        accessToken: String,
+        file: File,
+        metadata: YouTubeUploadMetadata
+    ): String {
+        if (!file.exists() || file.length() == 0L) {
+            throw IllegalArgumentException("Yüklenecek MP4 bulunamadı.")
+        }
+
+        val snippet = JSONObject().apply {
+            put("title", metadata.title.take(100))
+            put(
+                "description",
+                buildString {
+                    append(metadata.description.take(4500))
+                    if (metadata.hashtags.isNotEmpty()) {
+                        append("\n\n")
+                        append(metadata.hashtags.joinToString(" "))
+                    }
+                }.take(5000)
+            )
+            put("categoryId", "22")
+        }
+
+        val status = JSONObject().apply {
+            put("privacyStatus", metadata.privacyStatus)
+            put("selfDeclaredMadeForKids", false)
+        }
+
+        val body = JSONObject().apply {
+            put("snippet", snippet)
+            put("status", status)
+        }.toString()
+
+        val sessionRequest = Request.Builder()
+            .url(UPLOAD_URL)
+            .header("Authorization", "Bearer " + accessToken)
+            .header("X-Upload-Content-Type", "video/mp4")
+            .header("X-Upload-Content-Length", file.length().toString())
+            .post(okhttp3.RequestBody.create("application/json".toMediaType(), body))
+            .build()
+
+        client.newCall(sessionRequest).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException(
+                    "YouTube yükleme oturumu başlatılamadı. HTTP " +
+                            response.code + ": " + response.body?.string()
+                )
+            }
+
+            val uploadUrl = response.header("Location")
+                ?: throw IOException("YouTube yükleme adresi alınamadı.")
+
+            val uploadRequest = Request.Builder()
+                .url(uploadUrl)
+                .header("Authorization", "Bearer " + accessToken)
+                .put(file.asRequestBody("video/mp4".toMediaType()))
+                .build()
+
+            client.newCall(uploadRequest).execute().use { uploadResponse ->
+                val responseBody = uploadResponse.body?.string().orEmpty()
+                if (!uploadResponse.isSuccessful) {
+                    throw IOException(
+                        "YouTube video yüklenemedi. HTTP " +
+                                uploadResponse.code + ": " + responseBody
+                    )
+                }
+
+                val videoId = JSONObject(responseBody).optString("id")
+                if (videoId.isBlank()) {
+                    throw IOException("YouTube video ID alınamadı.")
+                }
+                return videoId
+            }
+        }
+    }
+}
