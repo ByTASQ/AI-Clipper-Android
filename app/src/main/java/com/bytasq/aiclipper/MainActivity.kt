@@ -37,6 +37,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.effect.Effects
+import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.ExportException
@@ -266,7 +268,13 @@ private fun exportSelectedClip(
         .setUri(uri)
         .setClippingConfiguration(clipping)
         .build()
-    val editedMediaItem = EditedMediaItem.Builder(mediaItem).build()
+    val presentation = Presentation.createForAspectRatio(
+        9f / 16f,
+        Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+    )
+    val editedMediaItem = EditedMediaItem.Builder(mediaItem)
+        .setEffects(Effects(emptyList(), listOf(presentation)))
+        .build()
 
     val transformer = Transformer.Builder(context)
         .setVideoMimeType(MimeTypes.VIDEO_H264)
