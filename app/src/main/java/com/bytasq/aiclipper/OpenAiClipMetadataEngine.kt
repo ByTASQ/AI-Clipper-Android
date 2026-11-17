@@ -99,7 +99,7 @@ class OpenAiClipMetadataEngine(
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                throw IOException("AI metadata ${response.code}: ${responseBody}")
+                throw IOException("AI metadata " + response.code + ": " + responseBody)
             }
 
             val content = JSONObject(responseBody)
