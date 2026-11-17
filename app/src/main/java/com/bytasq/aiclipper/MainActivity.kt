@@ -675,6 +675,37 @@ private suspend fun exportClip(
     transformer.start(editedMediaItem, outputFile.absolutePath)
 }
 
+@OptIn(UnstableApi::class)
+private fun exportSelectedClip(
+    context: android.content.Context,
+    uri: Uri,
+    startMs: Long,
+    endMs: Long,
+    transcript: Transcript?,
+    onStateChanged: (ExportState) -> Unit
+) {
+    onStateChanged(ExportState.Exporting)
+
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        try {
+            val file = exportClip(
+                context = context,
+                uri = uri,
+                startMs = startMs,
+                endMs = endMs,
+                transcript = transcript
+            )
+            onStateChanged(ExportState.Completed(file.name))
+        } catch (e: Exception) {
+            onStateChanged(
+                ExportState.Failed(
+                    e.message ?: "Bilinmeyen dışa aktarma hatası"
+                )
+            )
+        }
+    }
+}
+
 @Composable
 private fun VideoPreview(
     uri: Uri,
