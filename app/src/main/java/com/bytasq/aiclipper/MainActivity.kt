@@ -112,6 +112,7 @@ private fun extractSharedYoutubeUrl(intent: Intent?): String? {
 private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var selectedVideo by remember { mutableStateOf<Uri?>(null) }
     var sharedYoutubeUrl by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
+    var youtubeUrlInput by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
     var youtubeDownloadState by remember { mutableStateOf<YouTubeDownloadState>(YouTubeDownloadState.Idle) }
     var autoProcessYoutube by remember { mutableStateOf(false) }
     var videoDurationMs by remember { mutableStateOf(0L) }
@@ -276,6 +277,54 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 )
 
                 Text(text = "Video → konuşma → analiz → klip.", style = MaterialTheme.typography.bodyMedium)
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text("YouTube Video", style = MaterialTheme.typography.titleMedium)
+                        TextField(
+                            value = youtubeUrlInput,
+                            onValueChange = { youtubeUrlInput = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("YouTube video bağlantısı") },
+                            placeholder = { Text("https://www.youtube.com/watch?v=...") },
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                val url = youtubeUrlInput.trim()
+                                if (url.isBlank()) {
+                                    youtubeDownloadState = YouTubeDownloadState.Failed("YouTube bağlantısını gir.")
+                                } else {
+                                    selectedVideo = null
+                                    videoDurationMs = 0L
+                                    clipRange = 0f..0f
+                                    transcript = null
+                                    transcriptText = ""
+                                    analysisState = AnalysisState.Idle
+                                    analysisError = null
+                                    generatedClips = emptyList()
+                                    batchExportState = BatchExportState.Idle
+                                    youtubeDownloadState = YouTubeDownloadState.Downloading(0)
+                                    sharedYoutubeUrl = url
+                                }
+                            },
+                            enabled = youtubeUrlInput.trim().isNotEmpty(),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("YouTube Videosunu İşle")
+                        }
+                        when (val state = youtubeDownloadState) {
+                            YouTubeDownloadState.Idle -> Unit
+                            is YouTubeDownloadState.Downloading -> Text("YouTube indiriliyor... %${state.progress}", style = MaterialTheme.typography.labelMedium)
+                            YouTubeDownloadState.Processing -> Text("Video indirildi. Transkripsiyon ve AI analiz başlıyor...", style = MaterialTheme.typography.labelMedium)
+                            YouTubeDownloadState.Completed -> Text("✓ YouTube işlemi tamamlandı.", style = MaterialTheme.typography.labelMedium)
+                            is YouTubeDownloadState.Failed -> Text("YouTube hatası: ${state.message}", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
 
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
