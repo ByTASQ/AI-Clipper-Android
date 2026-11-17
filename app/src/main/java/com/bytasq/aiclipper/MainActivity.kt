@@ -128,7 +128,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var generatedClips by remember { mutableStateOf<List<GeneratedClip>>(emptyList()) }
     var batchExportState by remember { mutableStateOf<BatchExportState>(BatchExportState.Idle) }
     val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
     val youtubePublisher = remember(context) { YouTubePublisher(context) }
     var youtubeAccount by remember { mutableStateOf<YouTubeAccount?>(youtubePublisher.lastSignedInAccount()) }
     var youtubeStatus by remember { mutableStateOf<String?>(null) }
