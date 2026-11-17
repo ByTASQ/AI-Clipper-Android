@@ -4,6 +4,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.content.Context
+import android.content.Intent
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -81,16 +82,36 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 class MainActivity : ComponentActivity() {
+    private var sharedYoutubeUrl: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { AIClipperApp() }
+        sharedYoutubeUrl = extractSharedYoutubeUrl(intent)
+        setContent { AIClipperApp(initialYoutubeUrl = sharedYoutubeUrl) }
     }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        sharedYoutubeUrl = extractSharedYoutubeUrl(intent)
+        setContent { AIClipperApp(initialYoutubeUrl = sharedYoutubeUrl) }
+    }
+}
+
+private fun extractSharedYoutubeUrl(intent: Intent?): String? {
+    if (intent?.action != Intent.ACTION_SEND) return null
+    val text = intent.getStringExtra(Intent.EXTRA_TEXT)?.trim().orEmpty()
+    if (text.isBlank()) return null
+
+    val urlRegex = Regex("""https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+""")
+    return urlRegex.find(text)?.value?.trimEnd('.', ',', ';', ')', ']', '}')
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AIClipperApp() {
+private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var selectedVideo by remember { mutableStateOf<Uri?>(null) }
+    var sharedYoutubeUrl by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
     var videoDurationMs by remember { mutableStateOf(0L) }
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
@@ -267,6 +288,44 @@ private fun AIClipperApp() {
                         onClick = {
                             videoPicker.launch(arrayOf("video/*"))
                         },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.padding(3.dp))
+                        Text("Video Seç")
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            sharedYoutubeUrl = "YouTube'dan Paylaş → AI Clipper"
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("YouTube Linki Paylaş")
+                    }
+                }
+
+                if (sharedYoutubeUrl.isNotBlank()) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                "YouTube bağlantısı alındı",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                sharedYoutubeUrl,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "YouTube uygulamasında Paylaş → AI Clipper seçildiğinde bağlantı burada alınır.",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                }
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null)
