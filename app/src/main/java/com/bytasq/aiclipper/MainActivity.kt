@@ -815,7 +815,7 @@ private suspend fun exportClip(
         9f / 16f,
         Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
     )
-    val videoEffects = mutableListOf<androidx.media3.effect.GlEffect>(presentation)
+    val videoEffects = mutableListOf<Effect>(presentation)
 
     if (transcript != null && transcript.segments.isNotEmpty()) {
         videoEffects += OverlayEffect(
