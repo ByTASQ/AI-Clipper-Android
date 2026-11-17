@@ -40,7 +40,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.effect.Effects
+import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.Presentation
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.ExportException
@@ -78,6 +80,7 @@ private fun AIClipperApp() {
     var analysisState by remember { mutableStateOf<AnalysisState>(AnalysisState.Idle) }
     var apiKey by remember { mutableStateOf("") }
     var transcriptText by remember { mutableStateOf("") }
+    var transcript by remember { mutableStateOf<Transcript?>(null) }
     var analysisError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -88,6 +91,7 @@ private fun AIClipperApp() {
         selectedVideo = uri
         analysisState = AnalysisState.Idle
         transcriptText = ""
+        transcript = null
         analysisError = null
         clipRange = 0f..0f
     }
@@ -185,14 +189,15 @@ private fun AIClipperApp() {
                                     analysisState = AnalysisState.Analyzing
                                     analysisError = null
                                     try {
-                                        val transcript = OpenAiTranscriptionEngine(
+                                        val generatedTranscript = OpenAiTranscriptionEngine(
                                             context = context,
                                             apiKey = apiKey.trim()
                                         ).transcribe(selectedVideo!!)
-                                        transcriptText = transcript.fullText
+                                        transcript = generatedTranscript
+                                        transcriptText = generatedTranscript.fullText
                                         val result = OpenAiClipAnalysisEngine(
                                             apiKey = apiKey.trim()
-                                        ).analyze(transcript)
+                                        ).analyze(generatedTranscript)
 
                                         analysisState = AnalysisState.Completed(
                                             result.candidates.map {
@@ -319,6 +324,7 @@ private fun AIClipperApp() {
                                 uri = selectedVideo!!,
                                 startMs = (clipRange.start * 1000L).toLong(),
                                 endMs = (clipRange.endInclusive * 1000L).toLong(),
+                                transcript = transcript,
                                 onStateChanged = { exportState = it }
                             )
                         },
@@ -417,11 +423,13 @@ private sealed interface ExportState {
     data class Failed(val message: String) : ExportState
 }
 
+@OptIn(UnstableApi::class)
 private fun exportSelectedClip(
     context: android.content.Context,
     uri: Uri,
     startMs: Long,
     endMs: Long,
+    transcript: Transcript?,
     onStateChanged: (ExportState) -> Unit
 ) {
     if (endMs <= startMs) return
@@ -442,8 +450,22 @@ private fun exportSelectedClip(
         9f / 16f,
         Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
     )
+    val videoEffects = mutableListOf<androidx.media3.effect.GlEffect>(presentation)
+
+    if (transcript != null && transcript.segments.isNotEmpty()) {
+        videoEffects += OverlayEffect(
+            listOf(
+                SubtitleTextOverlay(
+                    segments = transcript.segments,
+                    clipStartMs = startMs,
+                    clipEndMs = endMs
+                )
+            )
+        )
+    }
+
     val editedMediaItem = EditedMediaItem.Builder(mediaItem)
-        .setEffects(Effects(emptyList(), listOf(presentation)))
+        .setEffects(Effects(emptyList(), videoEffects))
         .build()
 
     val transformer = Transformer.Builder(context)
