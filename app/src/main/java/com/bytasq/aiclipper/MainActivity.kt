@@ -90,7 +90,7 @@ class MainActivity : ComponentActivity() {
         setContent { AIClipperApp(initialYoutubeUrl = sharedYoutubeUrl) }
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         sharedYoutubeUrl = extractSharedYoutubeUrl(intent)
@@ -992,3 +992,226 @@ private fun ClipCandidateCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "${formatTime(candidate.startSeconds)} – ${formatTime(candidate.endSeconds)}",
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    "Skor ${candidate.score}",
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+
+            Text(
+                candidate.suggestedTitle,
+                style = MaterialTheme.typography.titleSmall
+            )
+
+            if (candidate.hook.isNotBlank()) {
+                Text(
+                    "Hook: ${candidate.hook}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+
+            Text(candidate.reason, style = MaterialTheme.typography.bodySmall)
+
+            OutlinedButton(
+                onClick = onSelect,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Bu Klipi Seç")
+            }
+        }
+    }
+}
+
+private sealed interface ExportState {
+    data object Idle : ExportState
+    data object Exporting : ExportState
+    data class Completed(val fileName: String) : ExportState
+    data class Failed(val message: String) : ExportState
+}
+
+@OptIn(UnstableApi::class)
+private suspend fun exportClip(
+    context: android.content.Context,
+    uri: Uri,
+    startMs: Long,
+    endMs: Long,
+    transcript: Transcript?
+): File = suspendCancellableCoroutine { continuation ->
+    if (endMs <= startMs) {
+        continuation.resumeWithException(IllegalArgumentException("Geçersiz klip aralığı."))
+        return@suspendCancellableCoroutine
+    }
+
+    val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
+    if (!outputDir.exists() && !outputDir.mkdirs()) {
+        continuation.resumeWithException(IllegalStateException("Çıkış klasörü oluşturulamadı."))
+        return@suspendCancellableCoroutine
+    }
+
+    val outputFile = File(outputDir, "AIClipper_" + System.currentTimeMillis() + "_" + startMs + ".mp4")
+
+    val clipping = MediaItem.ClippingConfiguration.Builder()
+        .setStartPositionMs(startMs)
+        .setEndPositionMs(endMs)
+        .build()
+    val mediaItem = MediaItem.Builder()
+        .setUri(uri)
+        .setClippingConfiguration(clipping)
+        .build()
+
+    val presentation = Presentation.createForAspectRatio(
+        9f / 16f,
+        Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+    )
+    val videoEffects = mutableListOf<Effect>(presentation)
+
+    if (transcript != null && transcript.segments.isNotEmpty()) {
+        videoEffects += OverlayEffect(
+            listOf(
+                SubtitleTextOverlay(
+                    segments = transcript.segments,
+                    clipStartMs = startMs,
+                    clipEndMs = endMs
+                )
+            )
+        )
+    }
+
+    val editedMediaItem = EditedMediaItem.Builder(mediaItem)
+        .setEffects(Effects(emptyList(), videoEffects))
+        .build()
+
+    val transformer = Transformer.Builder(context)
+        .setVideoMimeType(MimeTypes.VIDEO_H264)
+        .setAudioMimeType(MimeTypes.AUDIO_AAC)
+        .addListener(object : Transformer.Listener {
+            override fun onCompleted(
+                composition: Composition,
+                exportResult: ExportResult
+            ) {
+                android.media.MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(outputFile.absolutePath),
+                    arrayOf("video/mp4"),
+                    null
+                )
+                if (continuation.isActive) continuation.resume(outputFile)
+            }
+
+            override fun onError(
+                composition: Composition,
+                exportResult: ExportResult,
+                exportException: ExportException
+            ) {
+                outputFile.delete()
+                if (continuation.isActive) {
+                    continuation.resumeWithException(exportException)
+                }
+            }
+        })
+        .build()
+
+    continuation.invokeOnCancellation {
+        transformer.cancel()
+        outputFile.delete()
+    }
+
+    transformer.start(editedMediaItem, outputFile.absolutePath)
+}
+
+@OptIn(UnstableApi::class)
+private fun exportSelectedClip(
+    context: android.content.Context,
+    uri: Uri,
+    startMs: Long,
+    endMs: Long,
+    transcript: Transcript?,
+    onStateChanged: (ExportState) -> Unit
+) {
+    onStateChanged(ExportState.Exporting)
+
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        try {
+            val file = exportClip(
+                context = context,
+                uri = uri,
+                startMs = startMs,
+                endMs = endMs,
+                transcript = transcript
+            )
+            onStateChanged(ExportState.Completed(file.name))
+        } catch (e: Exception) {
+            onStateChanged(
+                ExportState.Failed(
+                    e.message ?: "Bilinmeyen dışa aktarma hatası"
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun VideoPreview(
+    uri: Uri,
+    clipRange: ClosedFloatingPointRange<Float>,
+    playSelection: Boolean,
+    onPlaySelectionConsumed: () -> Unit,
+    onDurationChanged: (Long) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(uri) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(uri))
+            prepare()
+            playWhenReady = false
+        }
+    }
+
+    DisposableEffect(player) {
+        onDispose { player.release() }
+    }
+
+    LaunchedEffect(player) {
+        while (true) {
+            val duration = player.duration
+            if (duration > 0L) onDurationChanged(duration)
+            delay(250)
+        }
+    }
+
+    LaunchedEffect(playSelection, clipRange) {
+        if (playSelection && clipRange.endInclusive > clipRange.start) {
+            player.seekTo((clipRange.start * 1000L).toLong())
+            player.playWhenReady = true
+            while (player.currentPosition < (clipRange.endInclusive * 1000L).toLong()) {
+                delay(100)
+            }
+            player.pause()
+            player.seekTo((clipRange.start * 1000L).toLong())
+            onPlaySelectionConsumed()
+        }
+    }
+
+    AndroidView(
+        factory = {
+            PlayerView(it).apply {
+                this.player = player
+                useController = true
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            }
+        },
+        modifier = Modifier.fillMaxSize()
+    )
+}
+
+private fun formatTime(seconds: Float): String {
+    val total = seconds.toInt()
+    val minutes = total / 60
+    val secs = total % 60
+    return "%02d:%02d".format(minutes, secs)
+}
