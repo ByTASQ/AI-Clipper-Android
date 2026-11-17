@@ -112,11 +112,14 @@ private fun extractSharedYoutubeUrl(intent: Intent?): String? {
 private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var selectedVideo by remember { mutableStateOf<Uri?>(null) }
     var sharedYoutubeUrl by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
+    var youtubeDownloadState by remember { mutableStateOf<YouTubeDownloadState>(YouTubeDownloadState.Idle) }
+    var autoProcessYoutube by remember { mutableStateOf(false) }
     var videoDurationMs by remember { mutableStateOf(0L) }
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
     var analysisState by remember { mutableStateOf<AnalysisState>(AnalysisState.Idle) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     var apiKey by remember(context) { mutableStateOf(loadOpenAiApiKey(context)) }
     var apiKeySaved by remember { mutableStateOf(false) }
     var transcriptText by remember { mutableStateOf("") }
@@ -132,6 +135,107 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var approvalClip by remember { mutableStateOf<GeneratedClip?>(null) }
     var uploadingClipPath by remember { mutableStateOf<String?>(null) }
     var publishedVideoIds by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    LaunchedEffect(sharedYoutubeUrl) {
+        if (sharedYoutubeUrl.isNotBlank() && selectedVideo == null && youtubeDownloadState is YouTubeDownloadState.Idle) {
+            if (apiKey.trim().isBlank()) {
+                youtubeDownloadState = YouTubeDownloadState.Failed("Önce OpenAI API anahtarını kaydet.")
+            } else {
+                youtubeDownloadState = YouTubeDownloadState.Downloading(0)
+                try {
+                    val file = YouTubeVideoDownloader(context).download(sharedYoutubeUrl) { progress ->
+                        youtubeDownloadState = YouTubeDownloadState.Downloading(progress)
+                    }
+                    selectedVideo = Uri.fromFile(file)
+                    analysisState = AnalysisState.Idle
+                    transcriptText = ""
+                    transcript = null
+                    analysisError = null
+                    clipRange = 0f..0f
+                    generatedClips = emptyList()
+                    batchExportState = BatchExportState.Idle
+                    autoProcessYoutube = true
+                    youtubeDownloadState = YouTubeDownloadState.Processing
+                } catch (e: Exception) {
+                    youtubeDownloadState = YouTubeDownloadState.Failed(e.message ?: "YouTube videosu indirilemedi.")
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(autoProcessYoutube, selectedVideo, videoDurationMs) {
+        if (!autoProcessYoutube || selectedVideo == null || videoDurationMs <= 0L) return@LaunchedEffect
+        autoProcessYoutube = false
+        try {
+            analysisState = AnalysisState.Analyzing
+            analysisError = null
+            val generatedTranscript = OpenAiTranscriptionEngine(
+                context = context,
+                apiKey = apiKey.trim()
+            ).transcribe(selectedVideo!!)
+            transcript = generatedTranscript
+            transcriptText = generatedTranscript.fullText
+
+            val result = OpenAiClipAnalysisEngine(
+                apiKey = apiKey.trim()
+            ).analyze(generatedTranscript)
+            val candidates = result.candidates.map {
+                ClipCandidate(
+                    startSeconds = it.startMs / 1000f,
+                    endSeconds = it.endMs / 1000f,
+                    score = it.score,
+                    hook = it.hook,
+                    reason = it.reason,
+                    suggestedTitle = it.suggestedTitle
+                )
+            }
+            analysisState = AnalysisState.Completed(candidates)
+
+            batchExportState = BatchExportState.Exporting(0, candidates.size)
+            val created = mutableListOf<GeneratedClip>()
+            candidates.forEachIndexed { index, candidate ->
+                val file = exportClip(
+                    context = context,
+                    uri = selectedVideo!!,
+                    startMs = (candidate.startSeconds * 1000L).toLong(),
+                    endMs = (candidate.endSeconds * 1000L).toLong(),
+                    transcript = generatedTranscript
+                )
+                val clipMetadata = try {
+                    OpenAiClipMetadataEngine(apiKey.trim()).generate(
+                        transcriptText = generatedTranscript.segments
+                            .filter {
+                                it.endMs > (candidate.startSeconds * 1000L).toLong() &&
+                                        it.startMs < (candidate.endSeconds * 1000L).toLong()
+                            }
+                            .joinToString(" ") { it.text },
+                        suggestedTitle = candidate.suggestedTitle,
+                        hook = candidate.hook,
+                        reason = candidate.reason
+                    )
+                } catch (_: Exception) {
+                    ClipMetadata(candidate.suggestedTitle, candidate.reason, emptyList())
+                }
+                created += GeneratedClip(
+                    fileName = file.name,
+                    filePath = file.absolutePath,
+                    title = clipMetadata.title,
+                    description = clipMetadata.description,
+                    hashtags = clipMetadata.hashtags,
+                    score = candidate.score
+                )
+                generatedClips = created.toList()
+                batchExportState = BatchExportState.Exporting(index + 1, candidates.size)
+            }
+            batchExportState = BatchExportState.Completed(created.size)
+            youtubeDownloadState = YouTubeDownloadState.Completed
+        } catch (e: Exception) {
+            analysisState = AnalysisState.Idle
+            batchExportState = BatchExportState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
+            youtubeDownloadState = YouTubeDownloadState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
+            analysisError = e.message ?: "Otomatik işlem sırasında hata oluştu."
+        }
+    }
 
     val youtubeLauncher = rememberLauncherForActivityResult(StartActivityForResult()) { result ->
         try {
@@ -285,39 +389,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Button(
-                        onClick = {
-                            videoPicker.launch(arrayOf("video/*"))
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.padding(3.dp))
-                        Text("Video Seç")
-                    }
-
-                }
-
-                if (sharedYoutubeUrl.isNotBlank()) {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                "YouTube bağlantısı alındı",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                sharedYoutubeUrl,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                "YouTube uygulamasında Paylaş → AI Clipper seçildiğinde bağlantı burada alınır.",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
-                    }
-                }
+                        onClick = { videoPicker.launch(arrayOf("video/*")) },
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null)
@@ -341,7 +413,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                         val result = OpenAiClipAnalysisEngine(
                                             apiKey = apiKey.trim()
                                         ).analyze(generatedTranscript)
-
                                         analysisState = AnalysisState.Completed(
                                             result.candidates.map {
                                                 ClipCandidate(
@@ -368,13 +439,29 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null)
                         Spacer(Modifier.padding(3.dp))
-                        Text(
-                            if (analysisState is AnalysisState.Analyzing) {
-                                "Analiz ediliyor..."
-                            } else {
-                                "AI Analiz"
-                            }
-                        )
+                        Text(if (analysisState is AnalysisState.Analyzing) "Analiz ediliyor..." else "AI Analiz")
+                    }
+                }
+
+                if (sharedYoutubeUrl.isNotBlank()) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("YouTube bağlantısı alındı", style = MaterialTheme.typography.titleSmall)
+                            Text(sharedYoutubeUrl, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                when (val state = youtubeDownloadState) {
+                                    YouTubeDownloadState.Idle -> "İndirme başlatılacak..."
+                                    is YouTubeDownloadState.Downloading -> "YouTube videosu indiriliyor... %${state.progress}"
+                                    YouTubeDownloadState.Processing -> "Video indirildi. AI işlemleri başlatılıyor..."
+                                    YouTubeDownloadState.Completed -> "✓ YouTube videosu işlendi ve klipler hazır."
+                                    is YouTubeDownloadState.Failed -> "İşlem hatası: ${state.message}"
+                                },
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
                     }
                 }
 
@@ -716,6 +803,14 @@ private fun loadOpenAiApiKey(context: Context): String {
     }
 }
 
+private sealed interface YouTubeDownloadState {
+    data object Idle : YouTubeDownloadState
+    data class Downloading(val progress: Int) : YouTubeDownloadState
+    data object Processing : YouTubeDownloadState
+    data object Completed : YouTubeDownloadState
+    data class Failed(val message: String) : YouTubeDownloadState
+}
+
 private data class ClipCandidate(
     val startSeconds: Float,
     val endSeconds: Float,
@@ -898,226 +993,3 @@ private fun ClipCandidateCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    "${formatTime(candidate.startSeconds)} – ${formatTime(candidate.endSeconds)}",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Text(
-                    "Skor ${candidate.score}",
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-
-            Text(
-                candidate.suggestedTitle,
-                style = MaterialTheme.typography.titleSmall
-            )
-
-            if (candidate.hook.isNotBlank()) {
-                Text(
-                    "Hook: ${candidate.hook}",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
-
-            Text(candidate.reason, style = MaterialTheme.typography.bodySmall)
-
-            OutlinedButton(
-                onClick = onSelect,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Bu Klipi Seç")
-            }
-        }
-    }
-}
-
-private sealed interface ExportState {
-    data object Idle : ExportState
-    data object Exporting : ExportState
-    data class Completed(val fileName: String) : ExportState
-    data class Failed(val message: String) : ExportState
-}
-
-@OptIn(UnstableApi::class)
-private suspend fun exportClip(
-    context: android.content.Context,
-    uri: Uri,
-    startMs: Long,
-    endMs: Long,
-    transcript: Transcript?
-): File = suspendCancellableCoroutine { continuation ->
-    if (endMs <= startMs) {
-        continuation.resumeWithException(IllegalArgumentException("Geçersiz klip aralığı."))
-        return@suspendCancellableCoroutine
-    }
-
-    val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
-    if (!outputDir.exists() && !outputDir.mkdirs()) {
-        continuation.resumeWithException(IllegalStateException("Çıkış klasörü oluşturulamadı."))
-        return@suspendCancellableCoroutine
-    }
-
-    val outputFile = File(outputDir, "AIClipper_" + System.currentTimeMillis() + "_" + startMs + ".mp4")
-
-    val clipping = MediaItem.ClippingConfiguration.Builder()
-        .setStartPositionMs(startMs)
-        .setEndPositionMs(endMs)
-        .build()
-    val mediaItem = MediaItem.Builder()
-        .setUri(uri)
-        .setClippingConfiguration(clipping)
-        .build()
-
-    val presentation = Presentation.createForAspectRatio(
-        9f / 16f,
-        Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
-    )
-    val videoEffects = mutableListOf<Effect>(presentation)
-
-    if (transcript != null && transcript.segments.isNotEmpty()) {
-        videoEffects += OverlayEffect(
-            listOf(
-                SubtitleTextOverlay(
-                    segments = transcript.segments,
-                    clipStartMs = startMs,
-                    clipEndMs = endMs
-                )
-            )
-        )
-    }
-
-    val editedMediaItem = EditedMediaItem.Builder(mediaItem)
-        .setEffects(Effects(emptyList(), videoEffects))
-        .build()
-
-    val transformer = Transformer.Builder(context)
-        .setVideoMimeType(MimeTypes.VIDEO_H264)
-        .setAudioMimeType(MimeTypes.AUDIO_AAC)
-        .addListener(object : Transformer.Listener {
-            override fun onCompleted(
-                composition: Composition,
-                exportResult: ExportResult
-            ) {
-                android.media.MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(outputFile.absolutePath),
-                    arrayOf("video/mp4"),
-                    null
-                )
-                if (continuation.isActive) continuation.resume(outputFile)
-            }
-
-            override fun onError(
-                composition: Composition,
-                exportResult: ExportResult,
-                exportException: ExportException
-            ) {
-                outputFile.delete()
-                if (continuation.isActive) {
-                    continuation.resumeWithException(exportException)
-                }
-            }
-        })
-        .build()
-
-    continuation.invokeOnCancellation {
-        transformer.cancel()
-        outputFile.delete()
-    }
-
-    transformer.start(editedMediaItem, outputFile.absolutePath)
-}
-
-@OptIn(UnstableApi::class)
-private fun exportSelectedClip(
-    context: android.content.Context,
-    uri: Uri,
-    startMs: Long,
-    endMs: Long,
-    transcript: Transcript?,
-    onStateChanged: (ExportState) -> Unit
-) {
-    onStateChanged(ExportState.Exporting)
-
-    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
-        try {
-            val file = exportClip(
-                context = context,
-                uri = uri,
-                startMs = startMs,
-                endMs = endMs,
-                transcript = transcript
-            )
-            onStateChanged(ExportState.Completed(file.name))
-        } catch (e: Exception) {
-            onStateChanged(
-                ExportState.Failed(
-                    e.message ?: "Bilinmeyen dışa aktarma hatası"
-                )
-            )
-        }
-    }
-}
-
-@Composable
-private fun VideoPreview(
-    uri: Uri,
-    clipRange: ClosedFloatingPointRange<Float>,
-    playSelection: Boolean,
-    onPlaySelectionConsumed: () -> Unit,
-    onDurationChanged: (Long) -> Unit
-) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val player = remember(uri) {
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(uri))
-            prepare()
-            playWhenReady = false
-        }
-    }
-
-    DisposableEffect(player) {
-        onDispose { player.release() }
-    }
-
-    LaunchedEffect(player) {
-        while (true) {
-            val duration = player.duration
-            if (duration > 0L) onDurationChanged(duration)
-            delay(250)
-        }
-    }
-
-    LaunchedEffect(playSelection, clipRange) {
-        if (playSelection && clipRange.endInclusive > clipRange.start) {
-            player.seekTo((clipRange.start * 1000L).toLong())
-            player.playWhenReady = true
-            while (player.currentPosition < (clipRange.endInclusive * 1000L).toLong()) {
-                delay(100)
-            }
-            player.pause()
-            player.seekTo((clipRange.start * 1000L).toLong())
-            onPlaySelectionConsumed()
-        }
-    }
-
-    AndroidView(
-        factory = {
-            PlayerView(it).apply {
-                this.player = player
-                useController = true
-                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-            }
-        },
-        modifier = Modifier.fillMaxSize()
-    )
-}
-
-private fun formatTime(seconds: Float): String {
-    val total = seconds.toInt()
-    val minutes = total / 60
-    val secs = total % 60
-    return "%02d:%02d".format(minutes, secs)
-}
