@@ -39,12 +39,19 @@ class YouTubePublisher(
             "https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status"
     }
 
-    fun signInIntent(): Intent {
-        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+    private fun signInOptions(): GoogleSignInOptions =
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
             .requestEmail()
             .requestScopes(Scope(UPLOAD_SCOPE))
             .build()
-        return GoogleSignIn.getClient(context, options).signInIntent
+
+    fun signInIntent(): Intent =
+        GoogleSignIn.getClient(context, signInOptions()).signInIntent
+
+    fun signOut(onComplete: () -> Unit = {}) {
+        GoogleSignIn.getClient(context, signInOptions())
+            .signOut()
+            .addOnCompleteListener { onComplete() }
     }
 
     fun accountFromResult(data: Intent?): YouTubeAccount {
