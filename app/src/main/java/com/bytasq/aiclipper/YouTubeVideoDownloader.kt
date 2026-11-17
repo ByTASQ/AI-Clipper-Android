@@ -38,9 +38,9 @@ class YouTubeVideoDownloader(private val context: Context) {
             File(outputDir, "${processId}_%(title)s.%(ext)s").absolutePath
         )
 
-        YoutubeDL.getInstance().execute(request, processId) { progress, _, _ ->
+        YoutubeDL.getInstance().execute(request, { progress, _ ->
             onProgress(progress.toInt().coerceIn(0, 100))
-        }
+        }, processId)
 
         outputDir.listFiles()
             ?.filter {
