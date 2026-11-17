@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -25,10 +27,12 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
@@ -41,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,6 +58,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AIClipperApp() {
     var selectedVideo by remember { mutableStateOf<Uri?>(null) }
+    var videoDurationMs by remember { mutableStateOf(0L) }
+    var clipRange by remember { mutableStateOf(0f..0f) }
+    var playSelection by remember { mutableStateOf(false) }
 
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -67,7 +76,8 @@ private fun AIClipperApp() {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(20.dp),
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
@@ -92,7 +102,18 @@ private fun AIClipperApp() {
                             .aspectRatio(9f / 16f)
                     ) {
                         if (selectedVideo != null) {
-                            VideoPreview(selectedVideo!!)
+                            VideoPreview(
+                                uri = selectedVideo!!,
+                                clipRange = clipRange,
+                                playSelection = playSelection,
+                                onPlaySelectionConsumed = { playSelection = false },
+                                onDurationChanged = { duration ->
+                                    if (duration > 0L && duration != videoDurationMs) {
+                                        videoDurationMs = duration
+                                        clipRange = 0f..duration.toFloat()
+                                    }
+                                }
+                            )
                         } else {
                             Box(
                                 modifier = Modifier.fillMaxSize(),
@@ -149,13 +170,43 @@ private fun AIClipperApp() {
                         style = MaterialTheme.typography.labelMedium
                     )
                 }
+ 
+                if (selectedVideo != null && videoDurationMs > 0L) {
+                    Text(
+                        text = "Klip aralığı: ${formatTime(clipRange.start)} – ${formatTime(clipRange.endInclusive)}",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+
+                    RangeSlider(
+                        value = clipRange,
+                        onValueChange = { range ->
+                            clipRange = range.start..max(range.endInclusive, range.start + 0.5f)
+                        },
+                        valueRange = 0f..videoDurationMs.toFloat(),
+                        steps = 0
+                    )
+
+                    Button(
+                        onClick = { playSelection = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Seçimi Oynat")
+                    }
+                }
             }
         }
     }
 }
 
+
 @Composable
-private fun VideoPreview(uri: Uri) {
+private fun VideoPreview(
+    uri: Uri,
+    clipRange: ClosedFloatingPointRange<Float>,
+    playSelection: Boolean,
+    onPlaySelectionConsumed: () -> Unit,
+    onDurationChanged: (Long) -> Unit
+) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
@@ -169,6 +220,27 @@ private fun VideoPreview(uri: Uri) {
         onDispose { player.release() }
     }
 
+    LaunchedEffect(player) {
+        while (true) {
+            val duration = player.duration
+            if (duration > 0L) onDurationChanged(duration)
+            delay(250)
+        }
+    }
+
+    LaunchedEffect(playSelection, clipRange) {
+        if (playSelection && clipRange.endInclusive > clipRange.start) {
+            player.seekTo((clipRange.start * 1000L).toLong())
+            player.playWhenReady = true
+            while (player.currentPosition < (clipRange.endInclusive * 1000L).toLong()) {
+                delay(100)
+            }
+            player.pause()
+            player.seekTo((clipRange.start * 1000L).toLong())
+            onPlaySelectionConsumed()
+        }
+    }
+
     AndroidView(
         factory = {
             PlayerView(it).apply {
@@ -179,4 +251,11 @@ private fun VideoPreview(uri: Uri) {
         },
         modifier = Modifier.fillMaxSize()
     )
+}
+
+private fun formatTime(seconds: Float): String {
+    val total = seconds.toInt()
+    val minutes = total / 60
+    val secs = total % 60
+    return "%02d:%02d".format(minutes, secs)
 }
