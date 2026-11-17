@@ -31,9 +31,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -57,6 +59,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import java.io.File
 import kotlin.math.max
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,6 +76,10 @@ private fun AIClipperApp() {
     var playSelection by remember { mutableStateOf(false) }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
     var analysisState by remember { mutableStateOf<AnalysisState>(AnalysisState.Idle) }
+    var apiKey by remember { mutableStateOf("") }
+    var transcriptText by remember { mutableStateOf("") }
+    var analysisError by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val videoPicker = rememberLauncherForActivityResult(
@@ -80,6 +87,8 @@ private fun AIClipperApp() {
     ) { uri ->
         selectedVideo = uri
         analysisState = AnalysisState.Idle
+        transcriptText = ""
+        analysisError = null
         clipRange = 0f..0f
     }
 
@@ -100,9 +109,15 @@ private fun AIClipperApp() {
                     style = MaterialTheme.typography.headlineSmall
                 )
 
-                Text(
-                    text = "İlk adım: telefondan video seçme.",
-                    style = MaterialTheme.typography.bodyMedium
+                Text(text = "Video → konuşma → analiz → klip.", style = MaterialTheme.typography.bodyMedium)
+
+                TextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it; analysisError = null },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("OpenAI API anahtarı") },
+                    placeholder = { Text("sk-...") },
+                    singleLine = true
                 )
 
                 Box(
