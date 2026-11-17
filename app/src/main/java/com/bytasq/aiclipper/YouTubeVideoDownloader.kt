@@ -2,10 +2,10 @@ package com.bytasq.aiclipper
 
 import android.content.Context
 import android.os.Environment
-import com.yausername.youtubedl_android.FFmpeg
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLException
-import com.yausername.youtubedl_android.YoutubeDLRequest
+import io.github.junkfood02.youtubedl_android.FFmpeg
+import io.github.junkfood02.youtubedl_android.YoutubeDL
+import io.github.junkfood02.youtubedl_android.YoutubeDLException
+import io.github.junkfood02.youtubedl_android.YoutubeDLRequest
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,7 +27,7 @@ class YouTubeVideoDownloader(private val context: Context) {
             throw IllegalStateException("AIClipper indirme klasörü oluşturulamadı.")
         }
 
-        val processId = "aiclipper_${System.currentTimeMillis()}"
+        val processId = "aiclipper_" + System.currentTimeMillis()
         val request = YoutubeDLRequest(url)
         request.addOption("-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b")
         request.addOption("--merge-output-format", "mp4")
@@ -35,12 +35,16 @@ class YouTubeVideoDownloader(private val context: Context) {
         request.addOption("--restrict-filenames")
         request.addOption(
             "-o",
-            File(outputDir, "${processId}_%(title)s.%(ext)s").absolutePath
+            File(outputDir, processId + "_%(title)s.%(ext)s").absolutePath
         )
 
-        YoutubeDL.getInstance().execute(request, { progress, _ ->
-            onProgress(progress.toInt().coerceIn(0, 100))
-        }, processId)
+        YoutubeDL.getInstance().execute(
+            request,
+            processId,
+            { progress, _, _ ->
+                onProgress(progress.toInt().coerceIn(0, 100))
+            }
+        )
 
         outputDir.listFiles()
             ?.filter {
