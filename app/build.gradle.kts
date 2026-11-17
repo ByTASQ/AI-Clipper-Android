@@ -37,6 +37,7 @@ dependencies {
     implementation("androidx.media3:media3-transformer:1.5.1")
     implementation("androidx.media3:media3-effect:1.5.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
