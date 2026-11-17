@@ -53,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import java.io.File
 import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
@@ -69,6 +70,7 @@ private fun AIClipperApp() {
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val videoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -204,7 +206,7 @@ private fun AIClipperApp() {
                     Button(
                         onClick = {
                             exportSelectedClip(
-                                context = androidx.compose.ui.platform.LocalContext.current,
+                                context = context,
                                 uri = selectedVideo!!,
                                 startMs = (clipRange.start * 1000L).toLong(),
                                 endMs = (clipRange.endInclusive * 1000L).toLong(),
