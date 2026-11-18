@@ -866,7 +866,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             }
         }
     }
-
     approvalClip?.let { clip ->
         YouTubeApprovalDialog(
             clip = clip,
