@@ -166,7 +166,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 }
             }
         }
-    }
 
     LaunchedEffect(autoProcessYoutube, selectedVideo, videoDurationMs) {
         if (!autoProcessYoutube || selectedVideo == null || videoDurationMs <= 0L) return@LaunchedEffect
