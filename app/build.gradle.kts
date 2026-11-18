@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.chaquo.python")
 }
 
 android {
@@ -51,6 +52,14 @@ android {
         compose = true
     }
 
+    chaquopy {
+        defaultConfig {
+            version = "3.11"
+            pip {
+                install("src/main/assets/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl")
+            }
+        }
+    }
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -72,6 +81,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
