@@ -117,6 +117,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var youtubeUrlInput by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
     var youtubeDownloadState by remember { mutableStateOf<YouTubeDownloadState>(YouTubeDownloadState.Idle) }
     var autoProcessYoutube by remember { mutableStateOf(false) }
+    var autoProcessPickedVideo by remember { mutableStateOf(false) }
+    var youtubeRequestId by remember { mutableStateOf(0) }
     var videoDurationMs by remember { mutableStateOf(0L) }
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
@@ -139,7 +141,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var publishedVideoIds by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var showProfileDialog by remember { mutableStateOf(false) }
 
-    LaunchedEffect(sharedYoutubeUrl) {
+    LaunchedEffect(sharedYoutubeUrl, youtubeRequestId) {
         if (sharedYoutubeUrl.isNotBlank() && selectedVideo == null && youtubeDownloadState is YouTubeDownloadState.Idle) {
             if (apiKey.trim().isBlank()) {
                 youtubeDownloadState = YouTubeDownloadState.Failed("Önce OpenAI API anahtarını kaydet.")
@@ -260,6 +262,18 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
         clipRange = 0f..0f
         generatedClips = emptyList()
         batchExportState = BatchExportState.Idle
+
+        if (uri != null && autoProcessPickedVideo) {
+            autoProcessPickedVideo = false
+            if (apiKey.trim().isBlank()) {
+                youtubeDownloadState = YouTubeDownloadState.Failed(
+                    "Videoyu işlemek için önce OpenAI API anahtarını kaydet."
+                )
+            } else {
+                autoProcessYoutube = true
+                youtubeDownloadState = YouTubeDownloadState.Processing
+            }
+        }
     }
 
     MaterialTheme {
@@ -406,6 +420,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                     generatedClips = emptyList()
                                     batchExportState = BatchExportState.Idle
                                     youtubeDownloadState = YouTubeDownloadState.Downloading(0)
+                                    youtubeRequestId += 1
                                     sharedYoutubeUrl = url
                                 }
                             },
@@ -416,10 +431,39 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                         }
                         when (val state = youtubeDownloadState) {
                             YouTubeDownloadState.Idle -> Unit
-                            is YouTubeDownloadState.Downloading -> Text("YouTube indiriliyor... %${state.progress}", style = MaterialTheme.typography.labelMedium)
-                            YouTubeDownloadState.Processing -> Text("Video indirildi. Transkripsiyon ve AI analiz başlıyor...", style = MaterialTheme.typography.labelMedium)
-                            YouTubeDownloadState.Completed -> Text("✓ YouTube işlemi tamamlandı.", style = MaterialTheme.typography.labelMedium)
-                            is YouTubeDownloadState.Failed -> Text("YouTube hatası: ${state.message}", style = MaterialTheme.typography.labelMedium)
+                            is YouTubeDownloadState.Downloading -> {
+                                Text(
+                                    if (state.progress <= 0) {
+                                        "YouTube bağlantısı hazırlanıyor..."
+                                    } else {
+                                        "YouTube indiriliyor... %${state.progress}"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                            }
+                            YouTubeDownloadState.Processing -> Text(
+                                "Video indirildi. Transkripsiyon ve AI analiz başlıyor...",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            YouTubeDownloadState.Completed -> Text(
+                                "✓ YouTube işlemi tamamlandı.",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            is YouTubeDownloadState.Failed -> {
+                                Text(
+                                    "YouTube hatası: ${state.message}",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                OutlinedButton(
+                                    onClick = {
+                                        autoProcessPickedVideo = true
+                                        videoPicker.launch(arrayOf("video/*"))
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("İndirilemezse Cihazdan Video Seç")
+                                }
+                            }
                         }
                     }
                 }
@@ -539,7 +583,11 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                             Text(
                                 when (val state = youtubeDownloadState) {
                                     YouTubeDownloadState.Idle -> "İndirme başlatılacak..."
-                                    is YouTubeDownloadState.Downloading -> "YouTube videosu indiriliyor... %${state.progress}"
+                                    is YouTubeDownloadState.Downloading -> if (state.progress <= 0) {
+                                        "YouTube bağlantısı hazırlanıyor..."
+                                    } else {
+                                        "YouTube videosu indiriliyor... %${state.progress}"
+                                    }
                                     YouTubeDownloadState.Processing -> "Video indirildi. AI işlemleri başlatılıyor..."
                                     YouTubeDownloadState.Completed -> "✓ YouTube videosu işlendi ve klipler hazır."
                                     is YouTubeDownloadState.Failed -> "İşlem hatası: ${state.message}"
