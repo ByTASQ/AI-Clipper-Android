@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, HttpUrl
 
 app = FastAPI(title="AI Clipper YouTube Downloader")
@@ -50,7 +51,7 @@ def download_youtube(request: DownloadRequest):
             video,
             media_type="video/mp4",
             filename="aiclipper_source.mp4",
-            background=None,
+            background=BackgroundTask(shutil.rmtree, job_dir, ignore_errors=True),
         )
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="YouTube indirme zaman aşımına uğradı.")
