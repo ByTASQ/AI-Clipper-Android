@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.chaquo.python")
 }
 
 android {
@@ -49,6 +50,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    python {
+        pip {
+            install("yt-dlp==2026.10.26")
+        }
     }
 
     packaging {
