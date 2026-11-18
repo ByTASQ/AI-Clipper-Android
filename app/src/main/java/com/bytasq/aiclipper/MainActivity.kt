@@ -292,7 +292,9 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                         Button(
                             onClick = {
                                 showProfileDialog = false
-                                youtubeLauncher.launch(youtubePublisher.signInIntent())
+                                youtubePublisher.signOut {
+                                    youtubeLauncher.launch(youtubePublisher.signInIntent())
+                                }
                             }
                         ) {
                             Text(if (youtubeAccount == null) "Giriş Yap" else "Hesap Değiştir")
@@ -379,31 +381,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     }
                 }
 
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("YouTube Yayınlama", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            youtubeAccount?.email?.let { "Bağlı hesap: $it" } ?: "YouTube hesabı bağlı değil.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Button(
-                            onClick = { youtubeLauncher.launch(youtubePublisher.signInIntent()) },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(if (youtubeAccount == null) "YouTube Hesabını Bağla" else "YouTube Hesabını Değiştir")
-                        }
-                        Text(
-                            "Klipler otomatik yüklenmez; önce videoyu bir kez izleyip onaylaman gerekir.",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        youtubeStatus?.let {
-                            Text(it, style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
 
                 TextField(
                     value = apiKey,
@@ -725,11 +702,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                 clip = clip,
                                 publishedVideoId = publishedVideoIds[clip.filePath],
                                 onRequestApproval = {
-                                    if (youtubeAccount == null) {
-                                        youtubeStatus = "Önce YouTube hesabını bağla."
-                                    } else {
-                                        approvalClip = clip
-                                    }
+                                    approvalClip = clip
                                 }
                             )
                         }
@@ -807,6 +780,12 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             clip = clip,
             isUploading = uploadingClipPath == clip.filePath,
             uploadStatus = youtubeStatus,
+            youtubeAccount = youtubeAccount,
+            onSelectAccount = {
+                youtubePublisher.signOut {
+                    youtubeLauncher.launch(youtubePublisher.signInIntent())
+                }
+            },
             onDismiss = { approvalClip = null },
             onApprove = {
                 uploadingClipPath = clip.filePath
@@ -995,6 +974,8 @@ private fun YouTubeApprovalDialog(
     clip: GeneratedClip,
     isUploading: Boolean,
     uploadStatus: String?,
+    youtubeAccount: YouTubeAccount?,
+    onSelectAccount: () -> Unit,
     onDismiss: () -> Unit,
     onApprove: () -> Unit
 ) {
@@ -1015,6 +996,18 @@ private fun YouTubeApprovalDialog(
                     onPlaybackCompleted = { watchedOnce = true }
                 )
                 Text(
+                    "Yayın hesabı: " + (youtubeAccount?.email ?: "Henüz seçilmedi"),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedButton(
+                    onClick = onSelectAccount,
+                    enabled = !isUploading,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (youtubeAccount == null) "Yayın Hesabını Seç" else "Yayın Hesabını Değiştir")
+                }
+
+                Text(
                     if (watchedOnce) "✓ Video izlendi. Yayınlama onayı verebilirsin."
                     else "Video henüz tamamlanmadı.",
                     style = MaterialTheme.typography.labelMedium
@@ -1025,7 +1018,7 @@ private fun YouTubeApprovalDialog(
         confirmButton = {
             Button(
                 onClick = onApprove,
-                enabled = watchedOnce && !isUploading
+                enabled = watchedOnce && youtubeAccount != null && !isUploading
             ) {
                 Text(if (isUploading) "YouTube'a yükleniyor..." else "✓ Yayınla")
             }
