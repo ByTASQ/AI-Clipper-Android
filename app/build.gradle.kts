@@ -71,7 +71,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
-    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("dev.ffmpegkit-maintained:yt-dlp-android:2.0.2")
+    implementation("dev.ffmpegkit-maintained:yt-dlp-android-compat:2.0.2")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 
     implementation("androidx.compose.ui:ui")
