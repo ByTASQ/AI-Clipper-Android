@@ -19,10 +19,9 @@ class YouTubeVideoDownloader(private val context: Context) {
     suspend fun download(url: String, onProgress: (Int) -> Unit = {}): File = withContext(Dispatchers.IO) {
         init()
 
-        val outputDir = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            "AIClipper"
-        )
+        val baseDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
+            ?: throw IllegalStateException("Uygulama video klasörü oluşturulamadı.")
+        val outputDir = File(baseDir, "AIClipper")
         if (!outputDir.exists() && !outputDir.mkdirs()) {
             throw IllegalStateException("AIClipper indirme klasörü oluşturulamadı.")
         }
