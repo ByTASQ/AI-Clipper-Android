@@ -142,7 +142,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var showProfileDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(sharedYoutubeUrl, youtubeRequestId) {
-        if (sharedYoutubeUrl.isNotBlank() && selectedVideo == null && youtubeDownloadState is YouTubeDownloadState.Idle) {
+        if (sharedYoutubeUrl.isNotBlank() && selectedVideo == null) {
             if (apiKey.trim().isBlank()) {
                 youtubeDownloadState = YouTubeDownloadState.Failed("Önce OpenAI API anahtarını kaydet.")
             } else {
