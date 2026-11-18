@@ -80,6 +80,8 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.5.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1")
+    implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 
