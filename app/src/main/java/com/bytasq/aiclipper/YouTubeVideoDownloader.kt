@@ -18,7 +18,6 @@ import dev.ffmpegkit_maintained.ytdlp.YtDlpRequest
 import java.io.File
 import java.io.FileOutputStream
 import java.io.FileWriter
-import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -241,11 +240,11 @@ class YouTubeVideoDownloader(private val context: Context) {
                     val value = item.substring(separator + 1).trim()
                     if (name.isBlank()) return@forEach
 
-                    writer.append(".youtube.com\\tTRUE\\t/\\tTRUE\\t0\\t")
+                    writer.append(".youtube.com\tTRUE\t/\tTRUE\t0\t")
                         .append(name)
-                        .append('\\t')
+                        .append('\t')
                         .append(value)
-                        .append('\\n')
+                        .append('\n')
                 }
             }
             if (file.length() > 0L) file else null
