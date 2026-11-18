@@ -7,12 +7,6 @@ import dev.ffmpegkit_maintained.ytdlp.YtDlpRequest
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-import java.util.concurrent.TimeUnit
 
 class YouTubeVideoDownloader(private val context: Context) {
 
@@ -21,78 +15,8 @@ class YouTubeVideoDownloader(private val context: Context) {
             val normalized = normalizeYoutubeUrl(url)
                 ?: throw IllegalArgumentException("Geçerli bir YouTube bağlantısı girin.")
 
-            try {
-                downloadFromServer(normalized, onProgress)
-            } catch (serverError: Exception) {
-                try {
-                    downloadLocally(normalized, onProgress)
-                } catch (localError: Exception) {
-                    throw IllegalStateException(
-                        "YouTube videosu alınamadı. Sunucu: ${serverError.message ?: "bağlantı hatası"}; " +
-                            "Cihaz: ${simplifyYoutubeError(localError.message ?: localError.toString())}"
-                    )
-                }
-            }
+            downloadLocally(normalized, onProgress)
         }
-
-    private fun downloadFromServer(url: String, onProgress: (Int) -> Unit): File {
-        val outputDir = getOutputDir()
-        val outputFile = File(
-            outputDir,
-            "aiclipper_server_${System.currentTimeMillis()}.mp4"
-        )
-
-        val body = JSONObject().put("url", url)
-            .toString()
-            .toRequestBody("application/json".toMediaType())
-
-        val request = Request.Builder()
-            .url(SERVER_URL)
-            .post(body)
-            .header("Accept", "video/mp4")
-            .build()
-
-        httpClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val detail = response.body?.string()?.take(1000).orEmpty()
-                throw IllegalStateException(
-                    "Sunucu HTTP ${response.code}: ${detail.ifBlank { response.message }}"
-                )
-            }
-
-            val responseBody = response.body
-                ?: throw IllegalStateException("Sunucu boş yanıt verdi.")
-
-            val total = responseBody.contentLength()
-            var received = 0L
-
-            responseBody.byteStream().use { input ->
-                outputFile.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count <= 0) break
-                        output.write(buffer, 0, count)
-                        received += count
-
-                        if (total > 0) {
-                            onProgress(((received * 100L) / total).toInt().coerceIn(0, 100))
-                        } else {
-                            onProgress(0)
-                        }
-                    }
-                }
-            }
-
-            if (!outputFile.exists() || outputFile.length() == 0L) {
-                outputFile.delete()
-                throw IllegalStateException("Sunucu MP4 dosyası göndermedi.")
-            }
-
-            onProgress(100)
-            return outputFile
-        }
-    }
 
     private fun downloadLocally(url: String, onProgress: (Int) -> Unit): File {
         val outputDir = getOutputDir()
@@ -187,18 +111,7 @@ class YouTubeVideoDownloader(private val context: Context) {
                 "YouTube indirmeyi reddetti (HTTP 403)."
             text.contains("Sign in", true) || text.contains("login", true) ->
                 "Bu YouTube videosu oturum açmayı gerektiriyor."
-            else -> "YouTube videosu indirilemedi. ${text.take(500)}"
+            else -> "YouTube videosu indirilemedi. " + text.take(500)
         }
-    }
-
-    companion object {
-        private const val SERVER_URL =
-            "https://api2.elektronikatolyesi.site/aiclipper/youtube/download"
-
-        private val httpClient = OkHttpClient.Builder()
-            .connectTimeout(20, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.MINUTES)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .build()
     }
 }
