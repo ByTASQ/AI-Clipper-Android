@@ -3,13 +3,22 @@ package com.bytasq.aiclipper
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import com.chaquo.python.Python
 import dev.ffmpegkit_maintained.ytdlp.YtDlp
 import dev.ffmpegkit_maintained.ytdlp.YtDlpRequest
 import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class YouTubeVideoDownloader(private val context: Context) {
+
+    companion object {
+        private const val OVERLAY_DIR = "ytdlp_overlay"
+        private const val OVERLAY_WHEEL = "yt_dlp-2026.10.26-py3-none-any.whl"
+        private const val OVERLAY_ASSET = "ytdlp/$OVERLAY_WHEEL"
+    }
 
     suspend fun download(url: String, onProgress: (Int) -> Unit = {}): File =
         withContext(Dispatchers.IO) {
@@ -22,9 +31,11 @@ class YouTubeVideoDownloader(private val context: Context) {
     private fun downloadLocally(url: String, onProgress: (Int) -> Unit): File {
         val outputDir = getOutputDir()
         YtDlp.init(context.applicationContext)
+        installYtDlpOverlayIfAvailable()
 
-        // YouTube istemcileri farklı erişim politikalarına tabi olabiliyor.
-        // Android/VR ve embedded istemcilerini web istemcilerinden ayrı deniyoruz.
+        // yt-dlp-android 2.0.2 içinde yt-dlp 2026.06.09 bulunuyor.
+        // YouTube tarafındaki güncel değişiklikler nedeniyle daha yeni yt-dlp
+        // sürümünü asset olarak AAR'ın üzerine bindiriyoruz.
         val strategies = listOf(
             "android_vr" to "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
             "android" to "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
@@ -90,6 +101,31 @@ class YouTubeVideoDownloader(private val context: Context) {
         throw IllegalStateException(simplifyYoutubeError(lastError))
     }
 
+    private fun installYtDlpOverlayIfAvailable() {
+        try {
+            val assetManager = context.assets
+            assetManager.open(OVERLAY_ASSET).use { input ->
+                val overlayDir = File(context.filesDir, OVERLAY_DIR)
+                if (!overlayDir.exists() && !overlayDir.mkdirs()) {
+                    return
+                }
+
+                val wheel = File(overlayDir, OVERLAY_WHEEL)
+                if (!wheel.exists() || wheel.length() == 0L) {
+                    input.copyTo(FileOutputStream(wheel))
+                }
+
+                val py = Python.getInstance()
+                py.getModule("sys")
+                    .get("path")
+                    .callAttr("insert", 0, wheel.absolutePath)
+            }
+        } catch (_: Throwable) {
+            // Yerel/debug derlemelerinde wheel asset'i olmayabilir.
+            // Bu durumda AAR içindeki yt-dlp sürümüyle devam edilir.
+        }
+    }
+
     private fun getOutputDir(): File {
         val baseDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)
             ?: throw IllegalStateException("Uygulama video klasörü oluşturulamadı.")
@@ -146,11 +182,11 @@ class YouTubeVideoDownloader(private val context: Context) {
 
             text.contains("PO Token", true) ||
                 text.contains("po token", true) ->
-                "YouTube PO Token doğrulaması istiyor. Kullanılan yt-dlp istemcisi bu videoyu çözemedi."
+                "YouTube PO Token doğrulaması istiyor. Güncel yt-dlp ile de bu video çözülemedi."
 
             text.contains("This video is not available", true) ||
                 text.contains("Video unavailable", true) ->
-                "YouTube videoyu seçilen istemcilerden vermedi. Tarayıcıda açılması, uygulamanın indirme istemcisinin başarısız olduğunu gösteriyor."
+                "YouTube videoyu indirme istemcisine vermedi. Güncel yt-dlp ve farklı istemciler denendi."
 
             text.contains("403", true) ||
                 text.contains("Forbidden", true) ->
