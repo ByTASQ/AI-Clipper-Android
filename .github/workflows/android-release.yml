@@ -25,12 +25,6 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Prepare current yt-dlp wheel
-        run: |
-          mkdir -p app/src/main/assets/ytdlp
-          python3 -m pip download --no-deps --only-binary=:all: yt-dlp==2026.10.26 -d "${RUNNER_TEMP}/ytdlp"
-          cp "${RUNNER_TEMP}/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl" app/src/main/assets/ytdlp/
-
       - name: Check signing secrets
         run: |
           test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || (echo "ANDROID_KEYSTORE_BASE64 secret is missing" && exit 1)
