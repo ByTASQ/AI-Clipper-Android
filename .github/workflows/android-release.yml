@@ -3,6 +3,8 @@ name: Android Release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "main"
     tags:
       - "v*"
 
@@ -42,9 +44,7 @@ jobs:
         shell: bash
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${RUNNER_TEMP}/release.keystore"
-          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore" \
-            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
-            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
+          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore"             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
             grep -E "Alias name:|SHA1:|SHA-1:"
 
       - name: Build signed release APK
