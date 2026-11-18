@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Environment
 import android.util.Log
 import com.chaquo.python.Python
+import dev.ffmpegkit_maintained.ytdlp.LogCallback
 import dev.ffmpegkit_maintained.ytdlp.YtDlp
 import dev.ffmpegkit_maintained.ytdlp.YtDlpRequest
 import java.io.File
@@ -79,7 +80,7 @@ class YouTubeVideoDownloader(private val context: Context) {
 
             try {
                 val debugLog = StringBuilder()
-                val logCallback = object : YtDlp.LogCallback {
+                val logCallback = object : LogCallback {
                     override fun onLog(level: String, message: String) {
                         debugLog.append("[")
                             .append(level)
