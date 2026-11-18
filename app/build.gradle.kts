@@ -52,9 +52,11 @@ android {
         compose = true
     }
 
-    python {
-        pip {
-            install("yt-dlp==2026.10.26")
+    chaquopy {
+        defaultConfig {
+            pip {
+                install("yt-dlp==2026.10.26")
+            }
         }
     }
 
