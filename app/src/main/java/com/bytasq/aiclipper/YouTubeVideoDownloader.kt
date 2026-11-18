@@ -47,6 +47,14 @@ class YouTubeVideoDownloader(private val context: Context) {
                     .addOption("--retries", "3")
                     .addOption("--fragment-retries", "3")
                     .addOption("--user-agent", userAgent)
+                    .addOption(
+                        "--extractor-args",
+                        if (index == 0) {
+                            "youtube:player_client=android,web"
+                        } else {
+                            "youtube:player_client=web_safari,android"
+                        }
+                    )
                     .addOption("-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b")
                     .addOption("--merge-output-format", "mp4")
 
@@ -92,7 +100,7 @@ class YouTubeVideoDownloader(private val context: Context) {
         val text = error.replace("\\n", " ").trim()
         return when {
             text.contains("This video is not available", true) ->
-                "YouTube bu videoyu bu istemciye sunmuyor. Video gizli, silinmiş, yaş/bölge kısıtlı veya erişim engelli olabilir."
+                "YouTube videosu seçilen istemciyle alınamadı. Farklı YouTube istemcileri denendi; video gizli, silinmiş, yaş/bölge kısıtlı veya YouTube tarafından indirmeye kapalı olabilir."
             text.contains("403", true) || text.contains("Forbidden", true) ->
                 "YouTube indirmeyi reddetti (HTTP 403). Başka bir YouTube istemcisi denenemedi."
             text.contains("Sign in", true) || text.contains("login", true) ->
