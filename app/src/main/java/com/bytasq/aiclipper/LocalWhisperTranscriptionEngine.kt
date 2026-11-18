@@ -34,7 +34,7 @@ class LocalWhisperTranscriptionEngine(private val context: Context) : Transcript
                 if (samples.isNotEmpty()) {
                     val result = recognize(modelDir, samples)
                     if (result.text.isNotBlank()) {
-                        segments += splitWithApproximateTiming(result.text.trim(), startMs, endMs)
+                        segments += buildTimestampedSegments(result, startMs, endMs)
                     }
                 }
             } finally {
@@ -76,6 +76,62 @@ class LocalWhisperTranscriptionEngine(private val context: Context) : Transcript
         } finally {
             recognizer.release()
         }
+    }
+
+    private fun buildTimestampedSegments(
+        result: OfflineRecognizerResult,
+        startMs: Long,
+        endMs: Long
+    ): List<TranscriptSegment> {
+        val tokens = result.tokens
+        val timestamps = result.timestamps
+
+        if (tokens.isEmpty() || timestamps.size != tokens.size) {
+            return splitWithApproximateTiming(result.text.trim(), startMs, endMs)
+        }
+
+        val resultSegments = mutableListOf<TranscriptSegment>()
+        var sentenceText = StringBuilder()
+        var sentenceStartMs = startMs
+        var sentenceEndMs = startMs
+
+        for (i in tokens.indices) {
+            val token = tokens[i]
+            val tokenStartMs = startMs + (timestamps[i].coerceAtLeast(0f) * 1000f).toLong()
+            val nextTokenMs = if (i + 1 < timestamps.size) {
+                startMs + (timestamps[i + 1].coerceAtLeast(timestamps[i]) * 1000f).toLong()
+            } else {
+                endMs
+            }
+            val tokenEndMs = nextTokenMs.coerceIn(tokenStartMs + 120L, endMs)
+
+            if (sentenceText.isEmpty()) sentenceStartMs = tokenStartMs
+            sentenceText.append(token)
+            sentenceEndMs = tokenEndMs
+
+            val normalized = sentenceText.toString().trim()
+            if (normalized.matches(Regex(".*[.!?…]\\s*$")) || normalized.length >= 180) {
+                if (normalized.isNotBlank()) {
+                    resultSegments += TranscriptSegment(
+                        sentenceStartMs.coerceIn(startMs, endMs),
+                        sentenceEndMs.coerceIn(startMs + 120L, endMs),
+                        normalized
+                    )
+                }
+                sentenceText = StringBuilder()
+            }
+        }
+
+        val tail = sentenceText.toString().trim()
+        if (tail.isNotBlank()) {
+            resultSegments += TranscriptSegment(
+                sentenceStartMs.coerceIn(startMs, endMs),
+                sentenceEndMs.coerceIn(startMs + 120L, endMs),
+                tail
+            )
+        }
+
+        return resultSegments
     }
 
     private fun splitWithApproximateTiming(text: String, startMs: Long, endMs: Long): List<TranscriptSegment> {
