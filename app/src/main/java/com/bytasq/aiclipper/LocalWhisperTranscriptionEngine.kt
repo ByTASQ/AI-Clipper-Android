@@ -58,7 +58,7 @@ class LocalWhisperTranscriptionEngine(private val context: Context) : Transcript
                     enableSegmentTimestamps = true
                 ),
                 tokens = File(modelDir, "tiny-tokens.txt").absolutePath,
-                modelType = "whisper"
+                modelType = "whisper",
             ),
             numThreads = maxOf(1, Runtime.getRuntime().availableProcessors() / 2),
             provider = "cpu"
