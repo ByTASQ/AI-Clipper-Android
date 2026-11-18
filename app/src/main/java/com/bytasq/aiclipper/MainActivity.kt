@@ -127,6 +127,9 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var apiKey by remember(context) { mutableStateOf(loadOpenAiApiKey(context)) }
     var apiKeySaved by remember { mutableStateOf(false) }
+    var downloaderServerUrl by remember(context) { mutableStateOf(loadDownloaderServerUrl(context)) }
+    var downloaderToken by remember(context) { mutableStateOf(loadDownloaderToken(context)) }
+    var downloaderSaved by remember { mutableStateOf(false) }
     var transcriptText by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf<Transcript?>(null) }
     var analysisError by remember { mutableStateOf<String?>(null) }
@@ -304,6 +307,61 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                 youtubeAccount?.email?.let { "YouTube hesabı:\n$it" }
                                     ?: "YouTube hesabı bağlı değil."
                             )
+
+                            Text(
+                                "Ücretsiz YouTube İndirici",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+
+                            Text(
+                                "YouTube indirme işlemi bu sunucudan yapılır; OpenAI kotası kullanmaz.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            TextField(
+                                value = downloaderServerUrl,
+                                onValueChange = {
+                                    downloaderServerUrl = it
+                                    downloaderSaved = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("İndirme sunucusu adresi") },
+                                placeholder = { Text("https://... veya http://192.168.x.x:8787") },
+                                singleLine = true
+                            )
+
+                            TextField(
+                                value = downloaderToken,
+                                onValueChange = {
+                                    downloaderToken = it
+                                    downloaderSaved = false
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("İndirme sunucusu güvenlik anahtarı") },
+                                singleLine = true
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = {
+                                        saveDownloaderSettings(
+                                            context,
+                                            downloaderServerUrl.trim(),
+                                            downloaderToken.trim()
+                                        )
+                                        downloaderSaved = true
+                                    },
+                                    enabled = downloaderServerUrl.trim().isNotEmpty() && downloaderToken.trim().isNotEmpty(),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("İndiriciyi Kaydet")
+                                }
+                                if (downloaderSaved) Text("✓ Kaydedildi")
+                            }
 
                             Text(
                                 "OpenAI API",
@@ -870,6 +928,28 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     }
 }
 
+
+private const val DOWNLOADER_PREFS = "ai_clipper_downloader"
+private const val DOWNLOADER_URL_KEY = "server_url"
+private const val DOWNLOADER_TOKEN_KEY = "server_token"
+
+private fun loadDownloaderServerUrl(context: Context): String {
+    return context.getSharedPreferences(DOWNLOADER_PREFS, Context.MODE_PRIVATE)
+        .getString(DOWNLOADER_URL_KEY, "") ?: ""
+}
+
+private fun loadDownloaderToken(context: Context): String {
+    return context.getSharedPreferences(DOWNLOADER_PREFS, Context.MODE_PRIVATE)
+        .getString(DOWNLOADER_TOKEN_KEY, "") ?: ""
+}
+
+private fun saveDownloaderSettings(context: Context, serverUrl: String, token: String) {
+    context.getSharedPreferences(DOWNLOADER_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(DOWNLOADER_URL_KEY, serverUrl)
+        .putString(DOWNLOADER_TOKEN_KEY, token)
+        .apply()
+}
 
 private const val OPENAI_KEY_ALIAS = "AIClipperOpenAIKey"
 private const val OPENAI_PREFS = "ai_clipper_secure_prefs"
