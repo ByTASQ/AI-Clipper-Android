@@ -299,93 +299,18 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                             )
 
                             Text(
-                                "YouTube indirme işlemi bu sunucudan yapılır; OpenAI kotası kullanmaz.",
+                                "İndirme, transkripsiyon ve klip analizi cihaz üzerinde çalışır. Sunucu veya OpenAI API anahtarı gerekmez.",
                                 style = MaterialTheme.typography.bodySmall
                             )
 
-                            TextField(
-                                value = downloaderServerUrl,
-                                onValueChange = {
-                                    downloaderServerUrl = it
-                                    downloaderSaved = false
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("İndirme sunucusu adresi") },
-                                placeholder = { Text("https://... veya http://192.168.x.x:8787") },
-                                singleLine = true
-                            )
-
-                            TextField(
-                                value = downloaderToken,
-                                onValueChange = {
-                                    downloaderToken = it
-                                    downloaderSaved = false
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("İndirme sunucusu güvenlik anahtarı") },
-                                singleLine = true
-                            )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Button(
-                                    onClick = {
-                                        saveDownloaderSettings(
-                                            context,
-                                            downloaderServerUrl.trim(),
-                                            downloaderToken.trim()
-                                        )
-                                        downloaderSaved = true
-                                    },
-                                    enabled = downloaderServerUrl.trim().isNotEmpty() && downloaderToken.trim().isNotEmpty(),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("İndiriciyi Kaydet")
-                                }
-                                if (downloaderSaved) Text("✓ Kaydedildi")
-                            }
-
                             Text(
-                                "OpenAI API",
+                                "Yerel yapay zekâ",
                                 style = MaterialTheme.typography.titleSmall
                             )
-
-                            TextField(
-                                value = apiKey,
-                                onValueChange = {
-                                    apiKey = it
-                                    apiKeySaved = false
-                                    analysisError = null
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("OpenAI API anahtarı") },
-                                placeholder = { Text("sk-...") },
-                                singleLine = true
+                            Text(
+                                "Whisper ile transkripsiyon ve yerel analiz kullanılır. OpenAI API kotası kullanılmaz.",
+                                style = MaterialTheme.typography.bodySmall
                             )
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Button(
-                                    onClick = {
-                                        saveOpenAiApiKey(context, apiKey.trim())
-                                        apiKeySaved = true
-                                    },
-                                    enabled = apiKey.trim().isNotEmpty(),
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text("API Anahtarını Kaydet")
-                                }
-
-                                if (apiKeySaved) {
-                                    Text("✓ Kaydedildi")
-                                }
-                            }
                         }
                     },
                     confirmButton = {
