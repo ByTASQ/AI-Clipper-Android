@@ -577,15 +577,10 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                     analysisState = AnalysisState.Analyzing
                                     analysisError = null
                                     try {
-                                        val generatedTranscript = OpenAiTranscriptionEngine(
-                                            context = context,
-                                            apiKey = apiKey.trim()
-                                        ).transcribe(selectedVideo!!)
+                                        val generatedTranscript = LocalWhisperTranscriptionEngine(context).transcribe(selectedVideo!!)
                                         transcript = generatedTranscript
                                         transcriptText = generatedTranscript.fullText
-                                        val result = OpenAiClipAnalysisEngine(
-                                            apiKey = apiKey.trim()
-                                        ).analyze(generatedTranscript)
+                                        val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
                                         analysisState = AnalysisState.Completed(
                                             result.candidates.map {
                                                 ClipCandidate(
@@ -711,9 +706,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                                     transcript = transcript
                                                 )
                                                 val clipMetadata = try {
-                                                    OpenAiClipMetadataEngine(
-                                                        apiKey = apiKey.trim()
-                                                    ).generate(
+                                                    LocalClipMetadataEngine().generate(
                                                         transcriptText = transcript?.segments
                                                             ?.filter {
                                                                 it.endMs > (candidate.startSeconds * 1000L).toLong() &&
