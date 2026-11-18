@@ -2,17 +2,7 @@ package com.bytasq.aiclipper
 
 import android.net.Uri
 import android.os.Bundle
-import android.os.Environment
-import android.content.Context
 import android.content.Intent
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
-import java.security.KeyStore
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -125,11 +115,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
     var analysisState by remember { mutableStateOf<AnalysisState>(AnalysisState.Idle) }
     val context = androidx.compose.ui.platform.LocalContext.current
-    var apiKey by remember(context) { mutableStateOf(loadOpenAiApiKey(context)) }
-    var apiKeySaved by remember { mutableStateOf(false) }
-    var downloaderServerUrl by remember(context) { mutableStateOf(loadDownloaderServerUrl(context)) }
-    var downloaderToken by remember(context) { mutableStateOf(loadDownloaderToken(context)) }
-    var downloaderSaved by remember { mutableStateOf(false) }
     var transcriptText by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf<Transcript?>(null) }
     var analysisError by remember { mutableStateOf<String?>(null) }
@@ -830,95 +815,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     }
 }
 
-
-private const val DOWNLOADER_PREFS = "ai_clipper_downloader"
-private const val DOWNLOADER_URL_KEY = "server_url"
-private const val DOWNLOADER_TOKEN_KEY = "server_token"
-
-private fun loadDownloaderServerUrl(context: Context): String {
-    return context.getSharedPreferences(DOWNLOADER_PREFS, Context.MODE_PRIVATE)
-        .getString(DOWNLOADER_URL_KEY, "") ?: ""
-}
-
-private fun loadDownloaderToken(context: Context): String {
-    return context.getSharedPreferences(DOWNLOADER_PREFS, Context.MODE_PRIVATE)
-        .getString(DOWNLOADER_TOKEN_KEY, "") ?: ""
-}
-
-private fun saveDownloaderSettings(context: Context, serverUrl: String, token: String) {
-    context.getSharedPreferences(DOWNLOADER_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString(DOWNLOADER_URL_KEY, serverUrl)
-        .putString(DOWNLOADER_TOKEN_KEY, token)
-        .apply()
-}
-
-private const val OPENAI_KEY_ALIAS = "AIClipperOpenAIKey"
-private const val OPENAI_PREFS = "ai_clipper_secure_prefs"
-private const val OPENAI_PREF_KEY = "openai_api_key"
-
-private fun getOpenAiSecretKey(): SecretKey {
-    val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-    val existing = keyStore.getKey(OPENAI_KEY_ALIAS, null) as? SecretKey
-    if (existing != null) return existing
-
-    val generator = KeyGenerator.getInstance(
-        KeyProperties.KEY_ALGORITHM_AES,
-        "AndroidKeyStore"
-    )
-    generator.init(
-        KeyGenParameterSpec.Builder(
-            OPENAI_KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .build()
-    )
-    return generator.generateKey()
-}
-
-private fun saveOpenAiApiKey(context: Context, apiKey: String) {
-    if (apiKey.isBlank()) return
-
-    val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-    cipher.init(Cipher.ENCRYPT_MODE, getOpenAiSecretKey())
-    val encrypted = cipher.doFinal(apiKey.toByteArray(Charsets.UTF_8))
-    val combined = cipher.iv + encrypted
-
-    context.getSharedPreferences(OPENAI_PREFS, Context.MODE_PRIVATE)
-        .edit()
-        .putString(
-            OPENAI_PREF_KEY,
-            Base64.encodeToString(combined, Base64.NO_WRAP)
-        )
-        .apply()
-}
-
-private fun loadOpenAiApiKey(context: Context): String {
-    return try {
-        val stored = context.getSharedPreferences(OPENAI_PREFS, Context.MODE_PRIVATE)
-            .getString(OPENAI_PREF_KEY, null)
-            ?: return ""
-
-        val combined = Base64.decode(stored, Base64.NO_WRAP)
-        if (combined.size <= 12) return ""
-
-        val iv = combined.copyOfRange(0, 12)
-        val encrypted = combined.copyOfRange(12, combined.size)
-
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            getOpenAiSecretKey(),
-            GCMParameterSpec(128, iv)
-        )
-
-        String(cipher.doFinal(encrypted), Charsets.UTF_8)
-    } catch (_: Exception) {
-        ""
-    }
-}
 
 private sealed interface YouTubeDownloadState {
     data object Idle : YouTubeDownloadState
