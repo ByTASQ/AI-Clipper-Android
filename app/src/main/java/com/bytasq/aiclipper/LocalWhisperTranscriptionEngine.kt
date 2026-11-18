@@ -59,9 +59,9 @@ class LocalWhisperTranscriptionEngine(private val context: Context) : Transcript
                 ),
                 tokens = File(modelDir, "tiny-tokens.txt").absolutePath,
                 modelType = "whisper",
-            ),
-            numThreads = maxOf(1, Runtime.getRuntime().availableProcessors() / 2),
-            provider = "cpu"
+                numThreads = maxOf(1, Runtime.getRuntime().availableProcessors() / 2),
+                provider = "cpu"
+            )
         )
         val recognizer = OfflineRecognizer(config = config)
         return try {
