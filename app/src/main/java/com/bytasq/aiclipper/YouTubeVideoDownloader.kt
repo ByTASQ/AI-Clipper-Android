@@ -348,22 +348,27 @@ class YouTubeVideoDownloader(private val context: Context) {
         return when {
             text.contains("Sign in", true) ||
                 text.contains("confirm you're not a bot", true) ->
-                "YouTube erişimi doğrulama istiyor. Bu cihazda doğrudan indirme engelleniyor."
+                "YouTube erişimi doğrulama istiyor.\n\n" +
+                    "yt-dlp: " + text.takeLast(1800)
 
             text.contains("PO Token", true) ||
                 text.contains("po token", true) ->
-                "YouTube PO Token doğrulaması istiyor. Güncel yt-dlp ile de bu video çözülemedi."
+                "YouTube PO Token doğrulaması istiyor.\n\n" +
+                    "yt-dlp: " + text.takeLast(1800)
 
             text.contains("This video is not available", true) ||
                 text.contains("Video unavailable", true) ->
-                "YouTube videoyu indirme istemcisine vermedi. Güncel yt-dlp ve farklı istemciler denendi."
+                "YouTube videoyu indirme istemcisine vermedi.\n\n" +
+                    "yt-dlp: " + text.takeLast(1800)
 
             text.contains("403", true) ||
                 text.contains("Forbidden", true) ->
-                "YouTube indirmeyi reddetti (HTTP 403)."
+                "YouTube HTTP 403 döndürdü.\n\n" +
+                    "yt-dlp: " + text.takeLast(1800)
 
             else ->
-                "YouTube videosu indirilemedi. Ayrıntılı yt-dlp tanısı: " + text.takeLast(2000)
+                "YouTube videosu indirilemedi.\n\n" +
+                    "yt-dlp tanısı:\n" + text.takeLast(1800)
         }
     }
 }
