@@ -34,9 +34,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -135,6 +137,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var approvalClip by remember { mutableStateOf<GeneratedClip?>(null) }
     var uploadingClipPath by remember { mutableStateOf<String?>(null) }
     var publishedVideoIds by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var showProfileDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(sharedYoutubeUrl) {
         if (sharedYoutubeUrl.isNotBlank() && selectedVideo == null && youtubeDownloadState is YouTubeDownloadState.Idle) {
@@ -261,8 +264,58 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
 
     MaterialTheme {
         Scaffold(
-            topBar = { TopAppBar(title = { Text("AI Clipper") }) }
+            topBar = {
+                TopAppBar(
+                    title = { Text("AI Clipper") },
+                    actions = {
+                        IconButton(onClick = { showProfileDialog = true }) {
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = "YouTube profili"
+                            )
+                        }
+                    }
+                )
+            }
         ) { padding ->
+            if (showProfileDialog) {
+                AlertDialog(
+                    onDismissRequest = { showProfileDialog = false },
+                    title = { Text("YouTube Profili") },
+                    text = {
+                        Text(
+                            youtubeAccount?.email?.let { "Bağlı hesap:\n$it" }
+                                ?: "YouTube hesabı bağlı değil."
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showProfileDialog = false
+                                youtubeLauncher.launch(youtubePublisher.signInIntent())
+                            }
+                        ) {
+                            Text(if (youtubeAccount == null) "Giriş Yap" else "Hesap Değiştir")
+                        }
+                    },
+                    dismissButton = {
+                        if (youtubeAccount != null) {
+                            TextButton(
+                                onClick = {
+                                    youtubePublisher.signOut {
+                                        youtubeAccount = null
+                                        youtubeStatus = "YouTube hesabından çıkış yapıldı."
+                                    }
+                                    showProfileDialog = false
+                                }
+                            ) {
+                                Text("Çıkış Yap")
+                            }
+                        }
+                    }
+                )
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
