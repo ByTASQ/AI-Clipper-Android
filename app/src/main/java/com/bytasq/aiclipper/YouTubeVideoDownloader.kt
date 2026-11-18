@@ -116,9 +116,8 @@ class YouTubeVideoDownloader(private val context: Context) {
                 }
 
                 val py = Python.getInstance()
-                py.getModule("sys")
-                    .get("path")
-                    .callAttr("insert", 0, wheel.absolutePath)
+                val sysPath = py.getModule("sys").get("path") ?: return
+                sysPath.callAttr("insert", 0, wheel.absolutePath)
             }
         } catch (_: Throwable) {
             // Yerel/debug derlemelerinde wheel asset'i olmayabilir.
