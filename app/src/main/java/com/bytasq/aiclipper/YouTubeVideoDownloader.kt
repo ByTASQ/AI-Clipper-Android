@@ -12,6 +12,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import java.io.File
 import java.io.FileWriter
 import kotlinx.coroutines.Dispatchers
@@ -46,6 +47,9 @@ class YouTubeVideoDownloader(private val context: Context) {
         val outputDir = getOutputDir()
 
         try {
+            if (!Python.isStarted()) {
+                Python.start(AndroidPlatform(context.applicationContext))
+            }
             val python = Python.getInstance()
             val module = python.getModule("youtube_downloader")
 
