@@ -22,13 +22,16 @@ class YouTubeVideoDownloader(private val context: Context) {
         val outputDir = getOutputDir()
         YtDlp.init(context.applicationContext)
 
-        val userAgents = listOf(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:155.0) Gecko/20100101 Firefox/155.0",
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+        val strategies = listOf(
+            "android" to "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36",
+            "web" to "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+            "tv" to "Mozilla/5.0 (SMART-TV; Linux; Tizen 6.0) AppleWebKit/537.36",
+            "ios" to "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile/15E148 Safari/604.1"
         )
         var lastError = ""
 
-        for ((index, userAgent) in userAgents.withIndex()) {
+        for ((index, strategy) in strategies.withIndex()) {
+            val (playerClient, userAgent) = strategy
             val processId = "aiclipper_" + System.currentTimeMillis() + "_" + index
             val outputTemplate = File(
                 outputDir,
@@ -39,17 +42,14 @@ class YouTubeVideoDownloader(private val context: Context) {
                 .setOutputTemplate(outputTemplate)
                 .addOption("--no-playlist")
                 .addOption("--newline")
-                .addOption("--no-warnings")
                 .addOption("--retries", "3")
-                .addOption("--fragment-retries", "3")
+                .addOption("--fragment-retries", "5")
+                .addOption("--extractor-retries", "3")
+                .addOption("--sleep-requests", "1")
                 .addOption("--user-agent", userAgent)
                 .addOption(
                     "--extractor-args",
-                    if (index == 0) {
-                        "youtube:player_client=android,web"
-                    } else {
-                        "youtube:player_client=web_safari,android"
-                    }
+                    "youtube:player_client=$playerClient"
                 )
                 .addOption("-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b")
                 .addOption("--merge-output-format", "mp4")
@@ -106,7 +106,7 @@ class YouTubeVideoDownloader(private val context: Context) {
         val text = error.replace("\\n", " ").trim()
         return when {
             text.contains("This video is not available", true) ->
-                "YouTube videosu seçilen istemciyle alınamadı."
+                "YouTube videosu bu indirme yöntemiyle alınamadı. Farklı YouTube istemcileri denendi."
             text.contains("403", true) || text.contains("Forbidden", true) ->
                 "YouTube indirmeyi reddetti (HTTP 403)."
             text.contains("Sign in", true) || text.contains("login", true) ->
