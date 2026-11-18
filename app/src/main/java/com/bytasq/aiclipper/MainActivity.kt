@@ -146,11 +146,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
 
     LaunchedEffect(sharedYoutubeUrl, youtubeRequestId) {
         if (sharedYoutubeUrl.isNotBlank() && selectedVideo == null) {
-            if (apiKey.trim().isBlank()) {
-                youtubeDownloadState = YouTubeDownloadState.Failed("Önce OpenAI API anahtarını kaydet.")
-            } else {
-                youtubeDownloadState = YouTubeDownloadState.Downloading(0)
-                try {
+            youtubeDownloadState = YouTubeDownloadState.Downloading(0)
+            try {
                     val file = YouTubeVideoDownloader(context).download(sharedYoutubeUrl) { progress ->
                         youtubeDownloadState = YouTubeDownloadState.Downloading(progress)
                     }
@@ -177,16 +174,11 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
         try {
             analysisState = AnalysisState.Analyzing
             analysisError = null
-            val generatedTranscript = OpenAiTranscriptionEngine(
-                context = context,
-                apiKey = apiKey.trim()
-            ).transcribe(selectedVideo!!)
+            val generatedTranscript = LocalWhisperTranscriptionEngine(context).transcribe(selectedVideo!!)
             transcript = generatedTranscript
             transcriptText = generatedTranscript.fullText
 
-            val result = OpenAiClipAnalysisEngine(
-                apiKey = apiKey.trim()
-            ).analyze(generatedTranscript)
+            val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
             val candidates = result.candidates.map {
                 ClipCandidate(
                     startSeconds = it.startMs / 1000f,
@@ -210,7 +202,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     transcript = generatedTranscript
                 )
                 val clipMetadata = try {
-                    OpenAiClipMetadataEngine(apiKey.trim()).generate(
+                    LocalClipMetadataEngine().generate(
                         transcriptText = generatedTranscript.segments
                             .filter {
                                 it.endMs > (candidate.startSeconds * 1000L).toLong() &&
@@ -268,14 +260,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
 
         if (uri != null && autoProcessPickedVideo) {
             autoProcessPickedVideo = false
-            if (apiKey.trim().isBlank()) {
-                youtubeDownloadState = YouTubeDownloadState.Failed(
-                    "Videoyu işlemek için önce OpenAI API anahtarını kaydet."
-                )
-            } else {
-                autoProcessYoutube = true
-                youtubeDownloadState = YouTubeDownloadState.Processing
-            }
+            autoProcessYoutube = true
+            youtubeDownloadState = YouTubeDownloadState.Processing
         }
     }
 
