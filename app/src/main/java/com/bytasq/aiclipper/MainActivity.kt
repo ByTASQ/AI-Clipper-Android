@@ -283,10 +283,53 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     onDismissRequest = { showProfileDialog = false },
                     title = { Text("YouTube Profili") },
                     text = {
-                        Text(
-                            youtubeAccount?.email?.let { "Bağlı hesap:\n$it" }
-                                ?: "YouTube hesabı bağlı değil."
-                        )
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                youtubeAccount?.email?.let { "YouTube hesabı:\n$it" }
+                                    ?: "YouTube hesabı bağlı değil."
+                            )
+
+                            Text(
+                                "OpenAI API",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+
+                            TextField(
+                                value = apiKey,
+                                onValueChange = {
+                                    apiKey = it
+                                    apiKeySaved = false
+                                    analysisError = null
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("OpenAI API anahtarı") },
+                                placeholder = { Text("sk-...") },
+                                singleLine = true
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Button(
+                                    onClick = {
+                                        saveOpenAiApiKey(context, apiKey.trim())
+                                        apiKeySaved = true
+                                    },
+                                    enabled = apiKey.trim().isNotEmpty(),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text("API Anahtarını Kaydet")
+                                }
+
+                                if (apiKeySaved) {
+                                    Text("✓ Kaydedildi")
+                                }
+                            }
+                        }
                     },
                     confirmButton = {
                         Button(
@@ -382,42 +425,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 }
 
 
-                TextField(
-                    value = apiKey,
-                    onValueChange = {
-                        apiKey = it
-                        apiKeySaved = false
-                        analysisError = null
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("OpenAI API anahtarı") },
-                    placeholder = { Text("sk-...") },
-                    singleLine = true
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            saveOpenAiApiKey(context, apiKey.trim())
-                            apiKeySaved = true
-                        },
-                        enabled = apiKey.trim().isNotEmpty(),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("API Anahtarını Kaydet")
-                    }
-
-                    if (apiKeySaved) {
-                        Text(
-                            "✓ Kaydedildi",
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.align(Alignment.CenterVertically)
-                        )
-                    }
-                }
 
                 Box(
                     modifier = Modifier
