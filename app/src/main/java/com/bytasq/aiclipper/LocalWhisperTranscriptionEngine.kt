@@ -27,7 +27,7 @@ class LocalWhisperTranscriptionEngine(private val context: Context) : Transcript
 
         while (startMs < durationMs) {
             val endMs = minOf(startMs + 30_000L, durationMs)
-            val pcm = File(context.cacheDir, "asr_\${System.currentTimeMillis()}.pcm")
+            val pcm = File(context.cacheDir, "asr_${System.currentTimeMillis()}.pcm")
             try {
                 AudioChunkDecoder.decodeToMono16k(context, videoUri, startMs, endMs, pcm)
                 val samples = readPcm(pcm)
