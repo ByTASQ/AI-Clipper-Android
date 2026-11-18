@@ -3,7 +3,14 @@ package com.bytasq.aiclipper
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import com.chaquo.python.Python
 import dev.ffmpegkit_maintained.ytdlp.LogCallback
 import dev.ffmpegkit_maintained.ytdlp.YtDlp
@@ -13,7 +20,9 @@ import java.io.FileOutputStream
 import java.io.FileWriter
 import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 class YouTubeVideoDownloader(private val context: Context) {
 
@@ -23,15 +32,22 @@ class YouTubeVideoDownloader(private val context: Context) {
         private const val OVERLAY_ASSET = "ytdlp/$OVERLAY_WHEEL"
     }
 
-    suspend fun download(url: String, onProgress: (Int) -> Unit = {}): File =
-        withContext(Dispatchers.IO) {
-            val normalized = normalizeYoutubeUrl(url)
-                ?: throw IllegalArgumentException("Geçerli bir YouTube bağlantısı girin.")
+    suspend fun download(url: String, onProgress: (Int) -> Unit = {}): File {
+        val normalized = normalizeYoutubeUrl(url)
+            ?: throw IllegalArgumentException("Geçerli bir YouTube bağlantısı girin.")
 
-            downloadLocally(normalized, onProgress)
+        val webCookies = collectYoutubeCookies(normalized)
+
+        return withContext(Dispatchers.IO) {
+            downloadLocally(normalized, webCookies, onProgress)
         }
+    }
 
-    private fun downloadLocally(url: String, onProgress: (Int) -> Unit): File {
+    private fun downloadLocally(
+        url: String,
+        webCookies: WebCookieSession?,
+        onProgress: (Int) -> Unit
+    ): File {
         val outputDir = getOutputDir()
         YtDlp.init(context.applicationContext)
         installYtDlpOverlayIfAvailable()
@@ -73,7 +89,10 @@ class YouTubeVideoDownloader(private val context: Context) {
                 .addOption("--extractor-retries", "3")
                 .addOption("--sleep-requests", "1")
                 .addOption("--force-ipv4")
-                .addOption("--user-agent", userAgent)
+                .addOption("--user-agent", webCookies?.userAgent ?: userAgent)
+                .apply {
+                    webCookies?.cookieFile?.let { addOption("--cookies", it) }
+                }
                 .addOption("--extractor-args", extractorArgs)
                 .addOption("-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b")
                 .addOption("--merge-output-format", "mp4")
@@ -120,6 +139,119 @@ class YouTubeVideoDownloader(private val context: Context) {
         }
 
         throw IllegalStateException(simplifyYoutubeError(lastError))
+    }
+
+    private data class WebCookieSession(
+        val cookieFile: String,
+        val userAgent: String
+    )
+
+    private suspend fun collectYoutubeCookies(url: String): WebCookieSession? =
+        withContext(Dispatchers.Main) {
+            suspendCancellableCoroutine { continuation ->
+                val webView = WebView(context.applicationContext)
+                val cookieManager = CookieManager.getInstance()
+                cookieManager.setAcceptCookie(true)
+
+                webView.settings.javaScriptEnabled = true
+                webView.settings.domStorageEnabled = true
+                webView.settings.userAgentString =
+                    "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 " +
+                        "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+
+                val handler = Handler(Looper.getMainLooper())
+                var finished = false
+
+                fun finish() {
+                    if (finished) return
+                    finished = true
+                    handler.removeCallbacksAndMessages(null)
+
+                    try {
+                        cookieManager.flush()
+                        val rawCookie = cookieManager.getCookie("https://www.youtube.com")
+                        val file = createNetscapeCookieFile(rawCookie)
+                        if (file != null) {
+                            continuation.resume(
+                                WebCookieSession(
+                                    file.absolutePath,
+                                    webView.settings.userAgentString
+                                )
+                            )
+                        } else {
+                            continuation.resume(null)
+                        }
+                    } catch (_: Throwable) {
+                        continuation.resume(null)
+                    }
+
+                    try {
+                        webView.stopLoading()
+                        webView.destroy()
+                    } catch (_: Throwable) {
+                    }
+                }
+
+                webView.webViewClient = object : WebViewClient() {
+                    override fun onPageFinished(view: WebView?, pageUrl: String?) {
+                        handler.postDelayed({ finish() }, 1200)
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?
+                    ) {
+                        if (request?.isForMainFrame == true) {
+                            handler.postDelayed({ finish() }, 300)
+                        }
+                    }
+                }
+
+                continuation.invokeOnCancellation {
+                    handler.post {
+                        try {
+                            webView.stopLoading()
+                            webView.destroy()
+                        } catch (_: Throwable) {
+                        }
+                    }
+                }
+
+                handler.postDelayed({ finish() }, 10000)
+                webView.loadUrl(url)
+            }
+        }
+
+    private fun createNetscapeCookieFile(rawCookie: String?): File? {
+        if (rawCookie.isNullOrBlank()) return null
+
+        val outputDir = getOutputDir()
+        val file = File(outputDir, "youtube-cookies.txt")
+
+        return try {
+            FileWriter(file, false).use { writer ->
+                writer.appendLine("# Netscape HTTP Cookie File")
+                writer.appendLine("# Generated from Android WebView CookieManager")
+                rawCookie.split(";").forEach { item ->
+                    val separator = item.indexOf('=')
+                    if (separator <= 0) return@forEach
+
+                    val name = item.substring(0, separator).trim()
+                    val value = item.substring(separator + 1).trim()
+                    if (name.isBlank()) return@forEach
+
+                    writer.append(".youtube.com\\tTRUE\\t/\\tTRUE\\t0\\t")
+                        .append(name)
+                        .append('\\t')
+                        .append(value)
+                        .append('\\n')
+                }
+            }
+            if (file.length() > 0L) file else null
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     private fun installYtDlpOverlayIfAvailable() {
