@@ -1,8 +1,26 @@
+import java.net.URL
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.chaquo.python")
+}
+
+val sherpaOnnxAar = layout.buildDirectory.file("downloads/sherpa-onnx-2.0.1.aar")
+val downloadSherpaOnnxAar = tasks.register("downloadSherpaOnnxAar") {
+    outputs.file(sherpaOnnxAar)
+    doLast {
+        val destination = sherpaOnnxAar.get().asFile
+        destination.parentFile.mkdirs()
+        URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar")
+            .openStream()
+            .use { input -> destination.outputStream().use { output -> input.copyTo(output, 1024 * 1024) } }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(downloadSherpaOnnxAar)
 }
 
 android {
@@ -80,7 +98,7 @@ dependencies {
     implementation("androidx.media3:media3-effect:1.5.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("com.github.k2-fsa:sherpa-onnx:v2.0.1")
+    implementation(files(sherpaOnnxAar))
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
