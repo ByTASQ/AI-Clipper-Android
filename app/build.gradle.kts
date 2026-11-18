@@ -55,7 +55,7 @@ android {
     chaquopy {
         defaultConfig {
             pip {
-                install("app/src/main/assets/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl")
+                install("src/main/assets/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl")
             }
         }
     }
