@@ -3,11 +3,13 @@ package com.bytasq.aiclipper
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import android.util.Log
 import com.chaquo.python.Python
 import dev.ffmpegkit_maintained.ytdlp.YtDlp
 import dev.ffmpegkit_maintained.ytdlp.YtDlpRequest
 import java.io.File
 import java.io.FileOutputStream
+import java.io.FileWriter
 import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -76,9 +78,26 @@ class YouTubeVideoDownloader(private val context: Context) {
                 .addOption("--merge-output-format", "mp4")
 
             try {
-                val response = YtDlp.executeAsync(request) { progress, _, _ ->
+                val debugLog = StringBuilder()
+                val logCallback = object : YtDlp.LogCallback {
+                    override fun onLog(level: String, message: String) {
+                        debugLog.append("[")
+                            .append(level)
+                            .append("] ")
+                            .append(message)
+                            .append("\n")
+                        Log.d("AIClipperYtDlp", "[$level] $message")
+                    }
+                }
+
+                val response = YtDlp.executeDebug(
+                    request,
+                    logCallback
+                ) { progress, _, _ ->
                     onProgress(progress.coerceIn(0f, 100f).toInt())
                 }.get()
+
+                writeDebugLog(playerClient, url, debugLog.toString())
 
                 if (response.isSuccess) {
                     val result = outputDir.listFiles()
@@ -92,9 +111,10 @@ class YouTubeVideoDownloader(private val context: Context) {
                     if (result != null) return result
                 }
 
-                lastError = response.toString()
+                lastError = buildDiagnosticError(response.toString(), debugLog.toString())
             } catch (t: Throwable) {
-                lastError = t.message ?: t.toString()
+                lastError = "[$playerClient] " + (t.message ?: t.toString())
+                Log.e("AIClipperYtDlp", lastError, t)
             }
         }
 
@@ -123,6 +143,25 @@ class YouTubeVideoDownloader(private val context: Context) {
             // Yerel/debug derlemelerinde wheel asset'i olmayabilir.
             // Bu durumda AAR içindeki yt-dlp sürümüyle devam edilir.
         }
+    }
+
+    private fun writeDebugLog(playerClient: String, url: String, log: String) {
+        try {
+            val file = File(getOutputDir(), "ytdlp-debug.log")
+            FileWriter(file, true).use { writer ->
+                writer.appendLine()
+                writer.appendLine("===== " + System.currentTimeMillis() + " / " + playerClient + " =====")
+                writer.appendLine("URL: " + url)
+                writer.append(log)
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun buildDiagnosticError(response: String, log: String): String {
+        val combined = (response + "\n" + log).trim()
+        Log.e("AIClipperYtDlp", combined.takeLast(12000))
+        return combined.takeLast(12000)
     }
 
     private fun getOutputDir(): File {
@@ -192,7 +231,7 @@ class YouTubeVideoDownloader(private val context: Context) {
                 "YouTube indirmeyi reddetti (HTTP 403)."
 
             else ->
-                "YouTube videosu indirilemedi. " + text.take(500)
+                "YouTube videosu indirilemedi. Ayrıntılı yt-dlp tanısı: " + text.takeLast(2000)
         }
     }
 }
