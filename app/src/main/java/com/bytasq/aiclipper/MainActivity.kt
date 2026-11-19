@@ -115,6 +115,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var autoProcessPickedVideo by remember { mutableStateOf(false) }
     var youtubeRequestId by remember { mutableStateOf(0) }
     var videoDurationMs by remember { mutableStateOf(0L) }
+    var targetClipDurationSec by remember { mutableStateOf(60) }
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
@@ -192,7 +193,10 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             analysisProgress = 0.95f
             analysisStatus = "Konuşma analizi tamamlandı. Klip adayları hesaplanıyor..."
 
-            val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
+            val result = LocalClipAnalysisEngine().analyze(
+                generatedTranscript,
+                targetDurationMs = targetClipDurationSec * 1000L
+            )
             val candidates = result.candidates.map {
                 ClipCandidate(
                     startSeconds = it.startMs / 1000f,
@@ -395,6 +399,38 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                             placeholder = { Text("https://www.youtube.com/watch?v=...") },
                             singleLine = true
                         )
+                        Text(
+                            "Short video süresi",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            "Önerilen: 60 saniye. Seçilen süreye yakın güçlü bölüm bulunur; bitiş doğal konuşma sonuna ayarlanır.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(45, 55, 60, 65, 75).forEach { seconds ->
+                                val selected = targetClipDurationSec == seconds
+                                if (selected) {
+                                    Button(
+                                        onClick = { targetClipDurationSec = seconds },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(seconds.toString() + "s")
+                                    }
+                                } else {
+                                    OutlinedButton(
+                                        onClick = { targetClipDurationSec = seconds },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text(seconds.toString() + "s")
+                                    }
+                                }
+                            }
+                        }
+
                         Button(
                             onClick = {
                                 val url = youtubeUrlInput.trim()
