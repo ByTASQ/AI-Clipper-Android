@@ -31,8 +31,8 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 endIndex++
             }
 
+            // Hedef süreye yaklaşmak için tolerans kullanılır; doğal segment sonu korunur.
             val end = segments[endIndex].endMs
-                .coerceAtMost(start + targetDurationMs + 10_000L)
             val text = segments
                 .filter { it.endMs > start && it.startMs < end }
                 .joinToString(" ") { it.text }
