@@ -192,7 +192,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             analysisStatus = "Konuşma analizi tamamlandı. Klip adayları hesaplanıyor..."
 
             val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
-            val candidates = result.candidates.map {
+            val candidates = if (result.candidates.isNotEmpty()) {
+                result.candidates.map {
                 ClipCandidate(
                     startSeconds = it.startMs / 1000f,
                     endSeconds = it.endMs / 1000f,
@@ -207,6 +208,10 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     reason = it.reason,
                     suggestedTitle = it.suggestedTitle
                 )
+            } else if (generatedTranscript.segments.isEmpty()) {
+                buildFallbackCandidates(context, selectedVideo!!)
+            } else {
+                emptyList()
             }
             analysisState = AnalysisState.Completed(candidates)
             analysisProgress = 1f
@@ -272,7 +277,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             analysisState = AnalysisState.Idle
             batchExportState = BatchExportState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
             youtubeDownloadState = YouTubeDownloadState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
-            analysisError = e.message ?: "Otomatik işlem sırasında hata oluştu."
+            analysisError = null
             autoProcessYoutube = false
         }
     }
@@ -1047,6 +1052,49 @@ private fun VideoPreview(
         },
         modifier = Modifier.fillMaxSize()
     )
+}
+
+private fun buildFallbackCandidates(
+    context: android.content.Context,
+    uri: Uri
+): List<ClipCandidate> {
+    val retriever = MediaMetadataRetriever()
+    val durationMs = try {
+        retriever.setDataSource(context, uri)
+        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            ?.toLongOrNull() ?: 0L
+    } finally {
+        retriever.release()
+    }
+
+    if (durationMs <= 0L) return emptyList()
+
+    val segments = if (durationMs <= 90_000L) {
+        listOf(ClipSegmentUi(0f, (durationMs / 1000f).coerceAtMost(90f)))
+    } else {
+        val clipLength = 18_000L
+        listOf(
+            ClipSegmentUi(0f, clipLength / 1000f),
+            ClipSegmentUi(
+                ((durationMs / 2L - clipLength / 2L).coerceAtLeast(0L) / 1000f),
+                ((durationMs / 2L + clipLength / 2L).coerceAtMost(durationMs) / 1000f)
+            ),
+            ClipSegmentUi(
+                ((durationMs - clipLength).coerceAtLeast(0L) / 1000f),
+                durationMs / 1000f
+            )
+        )
+    }
+
+    return listOf(ClipCandidate(
+        startSeconds = segments.minOf { it.startSeconds },
+        endSeconds = segments.maxOf { it.endSeconds },
+        score = 50,
+        hook = "Konuşma metni çıkarılamadı.",
+        reason = "Otomatik konuşma metni alınamadığı için güvenli kısa video bölümleri seçildi.",
+        suggestedTitle = "AI Short",
+        segments = segments
+    ))
 }
 
 private fun formatTime(seconds: Float): String {
