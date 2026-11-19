@@ -161,7 +161,14 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
         try {
             analysisState = AnalysisState.Analyzing
             analysisError = null
-            val generatedTranscript = LocalWhisperTranscriptionEngine(context).transcribe(selectedVideo!!)
+            analysisProgress = 0f
+            analysisStatus = "Video hazırlanıyor..."
+            val generatedTranscript = LocalWhisperTranscriptionEngine(context) { current, total ->
+                scope.launch {
+                    analysisProgress = current.toFloat() / total.toFloat()
+                    analysisStatus = "Transkript çıkarılıyor... %$current/$total"
+                }
+            }.transcribe(selectedVideo!!)
             transcript = generatedTranscript
             transcriptText = generatedTranscript.fullText
 
@@ -177,6 +184,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 )
             }
             analysisState = AnalysisState.Completed(candidates)
+            analysisProgress = 1f
+            analysisStatus = "Analiz tamamlandı: ${candidates.size} klip adayı bulundu."
 
             batchExportState = BatchExportState.Exporting(0, candidates.size)
             val created = mutableListOf<GeneratedClip>()
@@ -584,10 +593,13 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 when (val state = analysisState) {
                     AnalysisState.Idle -> Unit
                     AnalysisState.Analyzing -> {
-                        Text(
-                            "Transkript çıkarıldı. AI, güçlü klipleri seçiyor...",
-                            style = MaterialTheme.typography.labelMedium
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(analysisStatus, style = MaterialTheme.typography.labelMedium)
+                            LinearProgressIndicator(
+                                progress = { analysisProgress.coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                     is AnalysisState.Completed -> {
                         Text(
