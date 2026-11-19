@@ -741,6 +741,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                             ClipCandidateCard(
                                 candidate = candidate,
                                 onSelect = {
+                                    previewVideo = selectedVideo
+                                    playPreview = false
                                     clipRange = candidate.startSeconds..candidate.endSeconds
                                     playSelection = true
                                 }
