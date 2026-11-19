@@ -1,12 +1,18 @@
 package com.bytasq.aiclipper
 
+data class ClipSegment(
+    val startMs: Long,
+    val endMs: Long
+)
+
 data class AiClipCandidate(
     val startMs: Long,
     val endMs: Long,
     val score: Int,
     val hook: String,
     val reason: String,
-    val suggestedTitle: String
+    val suggestedTitle: String,
+    val segments: List<ClipSegment> = listOf(ClipSegment(startMs, endMs))
 )
 
 data class ClipAnalysisResult(
