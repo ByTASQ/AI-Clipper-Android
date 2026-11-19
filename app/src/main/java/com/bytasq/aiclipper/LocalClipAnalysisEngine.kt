@@ -1,7 +1,7 @@
 package com.bytasq.aiclipper
 
 class LocalClipAnalysisEngine : ClipAnalysisEngine {
-    override suspend fun analyze(transcript: Transcript): ClipAnalysisResult {
+    override suspend fun analyze(transcript: Transcript, targetDurationMs: Long): ClipAnalysisResult {
         if (transcript.segments.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
 
         val segments = transcript.segments.filter { it.text.isNotBlank() }
@@ -11,19 +11,29 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             val center = segments[centerIndex]
             var startIndex = centerIndex
             var endIndex = centerIndex
-            var duration = 0L
+            val start = segments[startIndex].startMs
+            val targetEnd = start + targetDurationMs.coerceIn(30_000L, 90_000L)
+            val minimumEnd = start + (targetDurationMs - 5_000L).coerceAtLeast(25_000L)
 
-            while (duration < 30_000L && endIndex < segments.lastIndex) {
+            // Hedef süreye yaklaşırken cümleyi/konuşma parçasını yarıda kesmemek için
+            // bitiş her zaman bir transkript segmentinin doğal sonundan alınır.
+            while (
+                endIndex < segments.lastIndex &&
+                segments[endIndex].endMs < minimumEnd
+            ) {
                 endIndex++
-                duration = segments[endIndex].endMs - segments[startIndex].startMs
             }
 
-            while (endIndex < segments.lastIndex && segments[endIndex + 1].endMs - segments[startIndex].startMs <= 90_000L) {
+            while (
+                endIndex < segments.lastIndex &&
+                segments[endIndex].endMs < targetEnd
+            ) {
                 endIndex++
             }
 
             val start = segments[startIndex].startMs
-            val end = segments[endIndex].endMs.coerceAtMost(start + 120_000L)
+            val end = segments[endIndex].endMs
+                .coerceAtMost(start + targetDurationMs + 10_000L)
             val text = segments
                 .filter { it.endMs > start && it.startMs < end }
                 .joinToString(" ") { it.text }
@@ -37,10 +47,13 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             val questionCount = Regex("[?]").findAll(text).count()
             val numberCount = Regex("\\b\\d+(?:[.,]\\d+)?\\b").findAll(text).count()
             val density = (words.size / 25).coerceAtMost(8)
+            val actualDuration = end - start
+            val distanceFromTarget = kotlin.math.abs(actualDuration - targetDurationMs)
             val lengthBonus = when {
-                end - start in 40_000L..75_000L -> 8
-                end - start in 75_001L..105_000L -> 5
-                else -> 2
+                distanceFromTarget <= 5_000L -> 12
+                distanceFromTarget <= 10_000L -> 8
+                distanceFromTarget <= 20_000L -> 4
+                else -> 0
             }
 
             val score = (42 + keywordCount * 5 + questionCount * 2 + numberCount * 2 + density + lengthBonus)
