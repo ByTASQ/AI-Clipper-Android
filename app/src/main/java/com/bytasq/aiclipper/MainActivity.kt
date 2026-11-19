@@ -35,7 +35,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -70,7 +69,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import java.io.File
-import kotlin.math.max
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -176,7 +174,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
         }
 
     LaunchedEffect(autoProcessYoutube, selectedVideo, videoDurationMs) {
-        if (!autoProcessYoutube || selectedVideo == null || videoDurationMs <= 0L) return@LaunchedEffect
+        if (!autoProcessYoutube || selectedVideo == null) return@LaunchedEffect
         try {
             analysisState = AnalysisState.Analyzing
             analysisError = null
@@ -214,35 +212,44 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             analysisProgress = 1f
             analysisStatus = "Analiz tamamlandı: ${candidates.size} klip adayı bulundu."
 
-            batchExportState = BatchExportState.Exporting(0, candidates.size)
-            val created = mutableListOf<GeneratedClip>()
-            candidates.forEachIndexed { index, candidate ->
-                val file = exportClip(
-                    context = context,
-                    uri = selectedVideo!!,
-                    startMs = (candidate.startSeconds * 1000L).toLong(),
-                    endMs = (candidate.endSeconds * 1000L).toLong(),
-                    transcript = generatedTranscript,
-                    segments = candidate.segments.map {
-                        it.startSeconds.toLong() * 1000L to it.endSeconds.toLong() * 1000L
-                    }
-                )
-                val clipMetadata = try {
-                    LocalClipMetadataEngine().generate(
-                        transcriptText = generatedTranscript.segments
-                            .filter {
-                                it.endMs > (candidate.startSeconds * 1000L).toLong() &&
-                                        it.startMs < (candidate.endSeconds * 1000L).toLong()
-                            }
-                            .joinToString(" ") { it.text },
-                        suggestedTitle = candidate.suggestedTitle,
-                        hook = candidate.hook,
-                        reason = candidate.reason
-                    )
-                } catch (_: Exception) {
-                    ClipMetadata(candidate.suggestedTitle, candidate.reason, emptyList())
+            if (candidates.isEmpty()) {
+                throw IllegalStateException("Önemli video bölümü bulunamadı.")
+            }
+
+            val candidate = candidates.first()
+            batchExportState = BatchExportState.Exporting(0, 1)
+
+            val file = exportClip(
+                context = context,
+                uri = selectedVideo!!,
+                startMs = candidate.startSeconds.toLong() * 1000L,
+                endMs = candidate.endSeconds.toLong() * 1000L,
+                transcript = generatedTranscript,
+                segments = candidate.segments.map {
+                    it.startSeconds.toLong() * 1000L to it.endSeconds.toLong() * 1000L
                 }
-                created += GeneratedClip(
+            )
+
+            val clipMetadata = try {
+                LocalClipMetadataEngine().generate(
+                    transcriptText = candidate.segments.joinToString(" ") { range ->
+                        generatedTranscript.segments
+                            .filter {
+                                it.endMs > (range.startSeconds * 1000L).toLong() &&
+                                        it.startMs < (range.endSeconds * 1000L).toLong()
+                            }
+                            .joinToString(" ") { it.text }
+                    },
+                    suggestedTitle = candidate.suggestedTitle,
+                    hook = candidate.hook,
+                    reason = candidate.reason
+                )
+            } catch (_: Exception) {
+                ClipMetadata(candidate.suggestedTitle, candidate.reason, emptyList())
+            }
+
+            val created = listOf(
+                GeneratedClip(
                     fileName = file.name,
                     filePath = file.absolutePath,
                     title = clipMetadata.title,
@@ -250,16 +257,15 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     hashtags = clipMetadata.hashtags,
                     score = candidate.score
                 )
-                generatedClips = created.toList()
-                if (index == 0) {
-                    previewVideo = Uri.fromFile(file)
-                    clipRange = 0f..0f
-                    playSelection = false
-                    playPreview = true
-                }
-                batchExportState = BatchExportState.Exporting(index + 1, candidates.size)
-            }
-            batchExportState = BatchExportState.Completed(created.size)
+            )
+
+            generatedClips = created
+            previewVideo = Uri.fromFile(file)
+            clipRange = 0f..0f
+            playSelection = false
+            playPreview = true
+            batchExportState = BatchExportState.Exporting(1, 1)
+
             youtubeDownloadState = YouTubeDownloadState.Completed
             autoProcessYoutube = false
         } catch (e: Exception) {
@@ -310,7 +316,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                         IconButton(onClick = { showProfileDialog = true }) {
                             Icon(
                                 imageVector = Icons.Default.AccountCircle,
-                                contentDescription = "YouTube profili"
+                                contentDescription = "YouTube hesabı"
                             )
                         }
                     }
@@ -320,35 +326,12 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             if (showProfileDialog) {
                 AlertDialog(
                     onDismissRequest = { showProfileDialog = false },
-                    title = { Text("YouTube Profili") },
+                    title = { Text("YouTube Hesabı") },
                     text = {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Text(
-                                youtubeAccount?.email?.let { "YouTube hesabı:\n$it" }
-                                    ?: "YouTube hesabı bağlı değil."
-                            )
-
-                            Text(
-                                "Ücretsiz YouTube İndirici",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-
-                            Text(
-                                "İndirme, transkripsiyon ve klip analizi cihaz üzerinde çalışır. Sunucu veya OpenAI API anahtarı gerekmez.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-
-                            Text(
-                                "Yerel yapay zekâ",
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            Text(
-                                "Whisper ile transkripsiyon ve yerel analiz kullanılır. OpenAI API kotası kullanılmaz.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
+                        Text(
+                            youtubeAccount?.email?.let { "Bağlı hesap:\n$it" }
+                                ?: "YouTube hesabı bağlı değil."
+                        )
                     },
                     confirmButton = {
                         Button(
@@ -384,85 +367,97 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
-                    .padding(20.dp)
+                    .padding(16.dp)
                     .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    text = "AI Clipper",
+                    "Videonu Short'a çevir",
                     style = MaterialTheme.typography.headlineSmall
                 )
 
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text("YouTube Video", style = MaterialTheme.typography.titleMedium)
-                        TextField(
-                            value = youtubeUrlInput,
-                            onValueChange = { youtubeUrlInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text("YouTube video bağlantısı") },
-                            placeholder = { Text("https://www.youtube.com/watch?v=...") },
-                            singleLine = true
-                        )
-                        Text(
-                            "AI klip süresini içerik belirler",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            "Başlangıç ve bitiş, konuşmanın doğal akışına ve içeriğin gücüne göre otomatik seçilir.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                Text(
+                    "Önemli bölümleri AI seçer ve tek bir Short videosunda birleştirir.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
 
-                        Button(
-                            onClick = {
-                                val url = youtubeUrlInput.trim()
-                                if (url.isBlank()) {
-                                    youtubeDownloadState = YouTubeDownloadState.Failed("YouTube bağlantısını gir.")
-                                } else {
-                                    selectedVideo = null
-                                    videoDurationMs = 0L
-                                    clipRange = 0f..0f
-                                    transcript = null
-                                    transcriptText = ""
-                                    analysisState = AnalysisState.Idle
-                                    analysisError = null
-                                    generatedClips = emptyList()
-                                    batchExportState = BatchExportState.Idle
-                                    youtubeDownloadState = YouTubeDownloadState.Downloading(0)
-                                    youtubeRequestId += 1
-                                    sharedYoutubeUrl = url
-                                }
-                            },
-                            enabled = youtubeUrlInput.trim().isNotEmpty(),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("YouTube Videosunu İşle")
+                TextField(
+                    value = youtubeUrlInput,
+                    onValueChange = { youtubeUrlInput = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("YouTube bağlantısı") },
+                    placeholder = { Text("https://youtu.be/...") },
+                    singleLine = true
+                )
+
+                Button(
+                    onClick = {
+                        val url = youtubeUrlInput.trim()
+                        if (url.isBlank()) {
+                            youtubeDownloadState =
+                                YouTubeDownloadState.Failed("YouTube bağlantısını gir.")
+                        } else {
+                            selectedVideo = null
+                            previewVideo = null
+                            generatedClips = emptyList()
+                            analysisError = null
+                            youtubeDownloadState = YouTubeDownloadState.Idle
+                            sharedYoutubeUrl = url
+                            youtubeRequestId += 1
                         }
-                        when (val state = youtubeDownloadState) {
-                            YouTubeDownloadState.Idle -> Unit
-                            is YouTubeDownloadState.Downloading -> {
-                                Text(
-                                    if (state.progress <= 0) {
-                                        "YouTube bağlantısı hazırlanıyor..."
-                                    } else {
-                                        "YouTube indiriliyor... %${state.progress}"
-                                    },
-                                    style = MaterialTheme.typography.labelMedium
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                    Text("Short Oluştur")
+                }
+
+                OutlinedButton(
+                    onClick = {
+                        autoProcessPickedVideo = true
+                        videoPicker.launch(arrayOf("video/*"))
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.VideoLibrary, contentDescription = null)
+                    Text("Telefondan Video Seç")
+                }
+
+                when (val state = youtubeDownloadState) {
+                    YouTubeDownloadState.Idle -> Unit
+
+                    is YouTubeDownloadState.Downloading -> {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Yüklemeler", style = MaterialTheme.typography.titleMedium)
+                                Text("Video indiriliyor... %" + state.progress)
+                                LinearProgressIndicator(
+                                    progress = { state.progress / 100f },
+                                    modifier = Modifier.fillMaxWidth()
                                 )
                             }
-                            YouTubeDownloadState.Processing -> Column(
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                        }
+                    }
+
+                    YouTubeDownloadState.Processing -> {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                Text("Yüklemeler", style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    when (val state = analysisState) {
-                                        AnalysisState.Analyzing -> analysisStatus
-                                        is AnalysisState.Completed -> "✓ " + analysisStatus
-                                        else -> "Video indirildi. Transkripsiyon ve AI analiz başlatılıyor..."
-                                    },
-                                    style = MaterialTheme.typography.labelMedium
+                                    when (val batch = batchExportState) {
+                                        is BatchExportState.Exporting ->
+                                            if (batch.total <= 1) "Short hazırlanıyor..."
+                                            else "Short hazırlanıyor... " + batch.current + "/" + batch.total
+                                        is BatchExportState.Completed -> "Short hazır."
+                                        is BatchExportState.Failed -> "Short oluşturulamadı."
+                                        BatchExportState.Idle -> analysisStatus
+                                    }
                                 )
                                 if (analysisState is AnalysisState.Analyzing) {
                                     LinearProgressIndicator(
@@ -471,381 +466,86 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                     )
                                 }
                             }
-                            YouTubeDownloadState.Completed -> Text(
-                                "✓ AI klipleri hazır: " + generatedClips.size + " klip",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                            is YouTubeDownloadState.Failed -> {
-                                Text(
-                                    "YouTube hatası: ${state.message}",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                                OutlinedButton(
+                        }
+                    }
+
+                    YouTubeDownloadState.Completed -> Unit
+
+                    is YouTubeDownloadState.Failed -> {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("İşlem başarısız", style = MaterialTheme.typography.titleMedium)
+                                Text(state.message)
+                                Button(
                                     onClick = {
-                                        autoProcessPickedVideo = true
-                                        videoPicker.launch(arrayOf("video/*"))
+                                        sharedYoutubeUrl = youtubeUrlInput.trim()
+                                        youtubeRequestId += 1
                                     },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("İndirilemezse Cihazdan Video Seç")
+                                    Text("Tekrar Dene")
                                 }
                             }
                         }
                     }
                 }
 
-
-
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        if (generatedClips.isNotEmpty()) "Oluşturulan klip önizlemesi" else "Video önizlemesi",
-                        style = MaterialTheme.typography.titleSmall,
-                        modifier = Modifier.padding(bottom = 6.dp)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(420.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Card(
-                            modifier = Modifier
-                                .height(420.dp)
-                                .aspectRatio(9f / 16f)
-                        ) {
-                            val previewUri = previewVideo ?: selectedVideo
-                            if (previewUri != null) {
-                                VideoPreview(
-                                    uri = previewUri,
-                                    clipRange = clipRange,
-                                    playSelection = playSelection,
-                                    autoPlay = playPreview,
-                                    muted = previewMuted,
-                                    onAutoPlayConsumed = { playPreview = false },
-                                    onPlaySelectionConsumed = { playSelection = false },
-                                    onDurationChanged = { duration ->
-                                        if (previewUri == selectedVideo && duration > 0L && duration != videoDurationMs) {
-                                            videoDurationMs = duration
-                                            clipRange = 0f..(duration / 1000f)
-                                        }
-                                    }
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(Icons.Default.VideoLibrary, contentDescription = null)
-                                        Spacer(Modifier.height(10.dp))
-                                        Text("Henüz video seçilmedi")
-                                        Text(
-                                            "9:16 Shorts önizleme",
-                                            style = MaterialTheme.typography.labelMedium
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Button(
-                        onClick = { videoPicker.launch(arrayOf("video/*")) },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.padding(3.dp))
-                        Text("Video Seç")
-                    }
-
-                    OutlinedButton(
-                        onClick = {
-                            if (videoDurationMs > 0L) {
-                                scope.launch {
-                                    analysisState = AnalysisState.Analyzing
-                                    analysisError = null
-                                    try {
-                                        val generatedTranscript = LocalWhisperTranscriptionEngine(context).transcribe(selectedVideo!!)
-                                        transcript = generatedTranscript
-                                        transcriptText = generatedTranscript.fullText
-                                        val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
-                                        analysisState = AnalysisState.Completed(
-                                            result.candidates.map {
-                                                ClipCandidate(
-                                                    startSeconds = it.startMs / 1000f,
-                                                    endSeconds = it.endMs / 1000f,
-                                                    score = it.score,
-                                                    hook = it.hook,
-                                                    reason = it.reason,
-                                                    suggestedTitle = it.suggestedTitle
-                                                )
-                                            }
-                                        )
-                                    } catch (e: Exception) {
-                                        analysisState = AnalysisState.Idle
-                                        analysisError = e.message ?: "Analiz sırasında hata oluştu."
-                                    }
-                                }
-                            }
-                        },
-                        enabled = selectedVideo != null &&
-                                videoDurationMs > 0L &&
-                                analysisState !is AnalysisState.Analyzing,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                        Spacer(Modifier.padding(3.dp))
-                        Text(if (analysisState is AnalysisState.Analyzing) "Analiz ediliyor..." else "AI Analiz")
-                    }
-                }
-
-                analysisError?.let {
-                    Text(
-                        text = "Analiz hatası: $it",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-
-                if (transcriptText.isNotBlank()) {
+                if (analysisError != null) {
                     Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text(
-                                text = transcriptText,
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Text(analysisError!!, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }
 
-                when (val state = analysisState) {
-                    AnalysisState.Idle -> Unit
-                    AnalysisState.Analyzing -> {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(analysisStatus, style = MaterialTheme.typography.labelMedium)
-                            LinearProgressIndicator(
-                                progress = { analysisProgress.coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                    is AnalysisState.Completed -> {
-                        Text(
-                            "Klip adayları",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            "AI; hook, bilgi değeri, merak, duygu ve izlenme potansiyeline göre semantik seçim yaptı.",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-
-                        Button(
-                            onClick = {
-                                if (batchExportState !is BatchExportState.Exporting) {
-                                    scope.launch {
-                                        batchExportState = BatchExportState.Exporting(
-                                            current = 0,
-                                            total = state.candidates.size
-                                        )
-                                        generatedClips = emptyList()
-
-                                        val created = mutableListOf<GeneratedClip>()
-                                        state.candidates.forEachIndexed { index, candidate ->
-                                            try {
-                                                val file = exportClip(
-                                                    context = context,
-                                                    uri = selectedVideo!!,
-                                                    startMs = (candidate.startSeconds * 1000L).toLong(),
-                                                    endMs = (candidate.endSeconds * 1000L).toLong(),
-                                                    transcript = transcript,
-                                                    segments = candidate.segments.map {
-                                                        it.startSeconds.toLong() * 1000L to it.endSeconds.toLong() * 1000L
-                                                    }
-                                                )
-                                                val clipMetadata = try {
-                                                    LocalClipMetadataEngine().generate(
-                                                        transcriptText = transcript?.segments
-                                                            ?.filter {
-                                                                it.endMs > (candidate.startSeconds * 1000L).toLong() &&
-                                                                        it.startMs < (candidate.endSeconds * 1000L).toLong()
-                                                            }
-                                                            ?.joinToString(" ") { it.text }
-                                                            .orEmpty(),
-                                                        suggestedTitle = candidate.suggestedTitle,
-                                                        hook = candidate.hook,
-                                                        reason = candidate.reason
-                                                    )
-                                                } catch (_: Exception) {
-                                                    ClipMetadata(
-                                                        title = candidate.suggestedTitle,
-                                                        description = candidate.reason,
-                                                        hashtags = emptyList()
-                                                    )
-                                                }
-
-                                                created += GeneratedClip(
-                                                    fileName = file.name,
-                                                    filePath = file.absolutePath,
-                                                    title = clipMetadata.title,
-                                                    description = clipMetadata.description,
-                                                    hashtags = clipMetadata.hashtags,
-                                                    score = candidate.score
-                                                )
-                                                generatedClips = created.toList()
-                                                batchExportState = BatchExportState.Exporting(
-                                                    current = index + 1,
-                                                    total = state.candidates.size
-                                                )
-                                            } catch (e: Exception) {
-                                                batchExportState = BatchExportState.Failed(
-                                                    "Klip " + (index + 1) + " oluşturulamadı: " +
-                                                            (e.message ?: "Bilinmeyen hata")
-                                                )
-                                                return@launch
-                                            }
-                                        }
-
-                                        batchExportState = BatchExportState.Completed(created.size)
-                                    }
-                                }
-                            },
-                            enabled = state.candidates.isNotEmpty() &&
-                                    selectedVideo != null &&
-                                    batchExportState !is BatchExportState.Exporting,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                when (batchExportState) {
-                                    BatchExportState.Idle,
-                                    is BatchExportState.Completed,
-                                    is BatchExportState.Failed -> "AI Kliplerinin Tümünü Oluştur"
-                                    is BatchExportState.Exporting -> "Klipler oluşturuluyor..."
-                                }
-                            )
-                        }
-
-                        when (val batch = batchExportState) {
-                            is BatchExportState.Exporting -> {
-                                Text(
-                                    "Klip " + batch.current + "/" + batch.total + " hazırlanıyor...",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                            is BatchExportState.Completed -> {
-                                Text(
-                                    batch.count.toString() + " klip hazır.",
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                            is BatchExportState.Failed -> {
-                                Text(
-                                    batch.message,
-                                    style = MaterialTheme.typography.labelMedium
-                                )
-                            }
-                            BatchExportState.Idle -> Unit
-                        }
-
-                        generatedClips.forEach { clip ->
-                            GeneratedClipCard(
-                                clip = clip,
-                                publishedVideoId = publishedVideoIds[clip.filePath],
-                                onRequestApproval = {
-                                    approvalClip = clip
-                                }
-                            )
-                        }
-
-                        state.candidates.forEach { candidate ->
-                            ClipCandidateCard(
-                                candidate = candidate,
-                                onSelect = {
-                                    previewVideo = selectedVideo
-                                    playPreview = false
-                                    clipRange = candidate.startSeconds..candidate.endSeconds
-                                    playSelection = true
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if (selectedVideo != null && videoDurationMs > 0L) {
+                generatedClips.firstOrNull()?.let { clip ->
                     Card(modifier = Modifier.fillMaxWidth()) {
                         Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Text(
-                                text = "Manuel klip seçimi",
+                                "Sonuç Videosu",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+
+                            Text(
+                                clip.title,
                                 style = MaterialTheme.typography.titleMedium
                             )
-                            Text(
-                                text = "AI adayları dışında istediğin başlangıç ve bitişi seç.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                text = "${formatTime(clipRange.start)} – ${formatTime(clipRange.endInclusive)}",
-                                style = MaterialTheme.typography.labelLarge
+
+                            GeneratedClipVideoPreview(
+                                filePath = clip.filePath,
+                                onPlaybackCompleted = {}
                             )
 
-                            RangeSlider(
-                        value = clipRange,
-                        onValueChange = { range ->
-                            clipRange = range.start..max(range.endInclusive, range.start + 0.5f)
-                        },
-                        valueRange = 0f..videoDurationMs.toFloat(),
-                        steps = 0
-                    )
-
-                    Button(
-                        onClick = { playSelection = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Seçimi Oynat")
-                    }
-
-                    Button(
-                        onClick = {
-                            exportSelectedClip(
-                                context = context,
-                                uri = selectedVideo!!,
-                                startMs = (clipRange.start * 1000L).toLong(),
-                                endMs = (clipRange.endInclusive * 1000L).toLong(),
-                                transcript = transcript,
-                                onStateChanged = { exportState = it }
-                            )
-                        },
-                        enabled = exportState !is ExportState.Exporting && clipRange.endInclusive > clipRange.start,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(
-                            when (exportState) {
-                                ExportState.Exporting -> "Klip oluşturuluyor..."
-                                ExportState.Idle, is ExportState.Completed -> "Klibi Dışa Aktar"
-                                is ExportState.Failed -> "Tekrar Dene"
+                            Button(
+                                onClick = { approvalClip = clip },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Onayla ve Paylaş")
                             }
-                        )
-                    }
 
-                    when (val state = exportState) {
-                        ExportState.Exporting -> Text("MP4 hazırlanıyor...", style = MaterialTheme.typography.labelMedium)
-                        is ExportState.Completed -> Text("Klip hazır: ${state.fileName}", style = MaterialTheme.typography.labelMedium)
-                        is ExportState.Failed -> Text("Dışa aktarma hatası: ${state.message}", style = MaterialTheme.typography.labelMedium)
-                        ExportState.Idle -> Unit
-                    }
+                            TextButton(
+                                onClick = {
+                                    generatedClips = emptyList()
+                                    sharedYoutubeUrl = youtubeUrlInput.trim()
+                                    youtubeRequestId += 1
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Yeniden Oluştur")
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
     approvalClip?.let { clip ->
         YouTubeApprovalDialog(
             clip = clip,
