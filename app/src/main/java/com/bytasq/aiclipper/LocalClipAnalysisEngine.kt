@@ -31,7 +31,6 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 endIndex++
             }
 
-            val start = segments[startIndex].startMs
             val end = segments[endIndex].endMs
                 .coerceAtMost(start + targetDurationMs + 10_000L)
             val text = segments
