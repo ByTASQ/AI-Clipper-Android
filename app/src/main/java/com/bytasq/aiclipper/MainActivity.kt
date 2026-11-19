@@ -107,6 +107,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var selectedVideo by remember { mutableStateOf<Uri?>(null) }
     var previewVideo by remember { mutableStateOf<Uri?>(null) }
     var playPreview by remember { mutableStateOf(false) }
+    var previewMuted by remember { mutableStateOf(false) }
     var sharedYoutubeUrl by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
     var youtubeUrlInput by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
     var youtubeDownloadState by remember { mutableStateOf<YouTubeDownloadState>(YouTubeDownloadState.Idle) }
@@ -501,6 +502,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                     clipRange = clipRange,
                                     playSelection = playSelection,
                                     autoPlay = playPreview,
+                                    muted = previewMuted,
                                     onAutoPlayConsumed = { playPreview = false },
                                     onPlaySelectionConsumed = { playSelection = false },
                                     onDurationChanged = { duration ->
@@ -1235,6 +1237,7 @@ private fun VideoPreview(
     clipRange: ClosedFloatingPointRange<Float>,
     playSelection: Boolean,
     autoPlay: Boolean = false,
+    muted: Boolean = false,
     onAutoPlayConsumed: () -> Unit = {},
     onPlaySelectionConsumed: () -> Unit,
     onDurationChanged: (Long) -> Unit
@@ -1243,6 +1246,7 @@ private fun VideoPreview(
     val player = remember(uri) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
+            volume = if (muted) 0f else 1f
             prepare()
             playWhenReady = autoPlay
         }
@@ -1258,6 +1262,10 @@ private fun VideoPreview(
             if (duration > 0L) onDurationChanged(duration)
             delay(250)
         }
+    }
+
+    LaunchedEffect(muted) {
+        player.volume = if (muted) 0f else 1f
     }
 
     LaunchedEffect(autoPlay) {
@@ -1284,10 +1292,12 @@ private fun VideoPreview(
     AndroidView(
         factory = {
             PlayerView(it).apply {
-                this.player = player
                 useController = true
                 resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
             }
+        },
+        update = {
+            it.player = player
         },
         modifier = Modifier.fillMaxSize()
     )
