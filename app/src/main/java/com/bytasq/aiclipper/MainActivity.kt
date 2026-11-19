@@ -115,7 +115,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var autoProcessPickedVideo by remember { mutableStateOf(false) }
     var youtubeRequestId by remember { mutableStateOf(0) }
     var videoDurationMs by remember { mutableStateOf(0L) }
-    var targetClipDurationSec by remember { mutableStateOf(60) }
     var clipRange by remember { mutableStateOf(0f..0f) }
     var playSelection by remember { mutableStateOf(false) }
     var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
