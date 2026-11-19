@@ -364,11 +364,9 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = "Videodan kısa klipler oluştur",
+                    text = "AI Clipper",
                     style = MaterialTheme.typography.headlineSmall
                 )
-
-                Text(text = "Video → konuşma → analiz → klip.", style = MaterialTheme.typography.bodyMedium)
 
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
@@ -561,48 +559,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     }
                 }
 
-                if (sharedYoutubeUrl.isNotBlank()) {
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text("YouTube bağlantısı alındı", style = MaterialTheme.typography.titleSmall)
-                            Text(sharedYoutubeUrl, style = MaterialTheme.typography.bodySmall)
-                            Text(
-                                when (val state = youtubeDownloadState) {
-                                    YouTubeDownloadState.Idle -> "İndirme başlatılacak..."
-                                    is YouTubeDownloadState.Downloading -> if (state.progress <= 0) {
-                                        "YouTube bağlantısı hazırlanıyor..."
-                                    } else {
-                                        "YouTube videosu indiriliyor... %${state.progress}"
-                                    }
-                                    YouTubeDownloadState.Processing -> when (val analysis = analysisState) {
-                                        AnalysisState.Analyzing -> analysisStatus
-                                        is AnalysisState.Completed -> "✓ " + analysisStatus
-                                        else -> "Video indirildi. AI işlemleri başlatılıyor..."
-                                    }
-                                    YouTubeDownloadState.Completed -> "✓ YouTube videosu işlendi ve klipler hazır."
-                                    is YouTubeDownloadState.Failed -> "İşlem hatası: ${state.message}"
-                                },
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                        }
-                    }
-                }
-
-                Text(
-                    text = selectedVideo?.lastPathSegment ?: "Video seçerek önizlemeyi başlat.",
-                    style = MaterialTheme.typography.labelMedium
-                )
-
-                if (selectedVideo != null) {
-                    Text(
-                        text = "Çıkış formatı: 9:16 • Shorts / Reels / TikTok",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
- 
                 analysisError?.let {
                     Text(
                         text = "Analiz hatası: $it",
@@ -611,14 +567,14 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 }
 
                 if (transcriptText.isNotBlank()) {
-                    Text(
-                        text = "Transkript",
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = transcriptText,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = transcriptText,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
 
                 when (val state = analysisState) {
@@ -769,12 +725,25 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 }
 
                 if (selectedVideo != null && videoDurationMs > 0L) {
-                    Text(
-                        text = "Klip aralığı: ${formatTime(clipRange.start)} – ${formatTime(clipRange.endInclusive)}",
-                        style = MaterialTheme.typography.titleSmall
-                    )
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Manuel klip seçimi",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "AI adayları dışında istediğin başlangıç ve bitişi seç.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                text = "${formatTime(clipRange.start)} – ${formatTime(clipRange.endInclusive)}",
+                                style = MaterialTheme.typography.labelLarge
+                            )
 
-                    RangeSlider(
+                            RangeSlider(
                         value = clipRange,
                         onValueChange = { range ->
                             clipRange = range.start..max(range.endInclusive, range.start + 0.5f)
@@ -818,6 +787,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                         is ExportState.Completed -> Text("Klip hazır: ${state.fileName}", style = MaterialTheme.typography.labelMedium)
                         is ExportState.Failed -> Text("Dışa aktarma hatası: ${state.message}", style = MaterialTheme.typography.labelMedium)
                         ExportState.Idle -> Unit
+                    }
+                        }
                     }
                 }
             }
