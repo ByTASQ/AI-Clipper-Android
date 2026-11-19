@@ -22,7 +22,7 @@ class OpenAiClipAnalysisEngine(
         .writeTimeout(3, TimeUnit.MINUTES)
         .build()
 
-    override suspend fun analyze(transcript: Transcript): ClipAnalysisResult =
+    override suspend fun analyze(transcript: Transcript, targetDurationMs: Long): ClipAnalysisResult =
         withContext(Dispatchers.IO) {
             if (apiKey.isBlank()) {
                 throw IllegalStateException("OpenAI API anahtarı girilmemiş.")
@@ -45,6 +45,7 @@ class OpenAiClipAnalysisEngine(
             val systemPrompt = """
                 Sen kısa video editörü ve içerik stratejistisin.
                 Verilen video transkriptinden Shorts/Reels/TikTok için en güçlü 3-5 klip bölümünü seç.
+                Hedef klip süresi yaklaşık ${targetDurationMs / 1000} saniyedir. Bu süreye mümkün olduğunca yaklaş, ancak cümleyi veya anlamlı konuşma parçasını yarıda kesme. Gerekirse birkaç saniye kısa veya uzun olabilirsin.
 
                 SADECE verilen transkript ve zaman bilgilerini kullan.
                 Gerçek dışı bilgi, uydurma cümle veya transkriptte olmayan olay ekleme.
