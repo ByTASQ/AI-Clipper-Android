@@ -161,7 +161,7 @@ class LocalWhisperTranscriptionEngine(private val context: Context) : Transcript
             val previous = result.lastOrNull()
             if (previous != null && item.startMs - previous.endMs < 700L) {
                 result[result.lastIndex] =
-                    TranscriptSegment(previous.startMs, item.endMs, "\${previous.text} \${item.text}")
+                    TranscriptSegment(previous.startMs, item.endMs, "${previous.text} ${item.text}")
             } else result += item
         }
         return result
