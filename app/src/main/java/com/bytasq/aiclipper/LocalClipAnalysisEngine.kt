@@ -11,141 +11,158 @@ import kotlin.math.min
  */
 class LocalClipAnalysisEngine : ClipAnalysisEngine {
     override suspend fun analyze(transcript: Transcript): ClipAnalysisResult {
-        if (transcript.segments.isEmpty()) {
-            return ClipAnalysisResult(transcript, emptyList())
+        val segments = transcript.segments
+            .filter { it.text.isNotBlank() && it.endMs > it.startMs }
+
+        if (segments.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
+
+        val scored = segments.mapIndexed { index, segment ->
+            val text = segment.text.replace(Regex("\\s+"), " ").trim()
+            val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
+            val keywordCount = KEYWORDS.count { text.contains(it, ignoreCase = true) }
+            val questionCount = Regex("[?]").findAll(text).count()
+            val numberCount = Regex("\\b\\d+(?:[.,]\\d+)?\\b").findAll(text).count()
+            val emotionalCount = Regex("[!]").findAll(text).count()
+            val density = words.size.toDouble() / ((segment.endMs - segment.startMs) / 1000.0)
+
+            val densityScore = when {
+                density >= 2.2 -> 15
+                density >= 1.7 -> 12
+                density >= 1.2 -> 8
+                density >= 0.8 -> 4
+                else -> 1
+            }
+
+            val score = (
+                35 +
+                min(keywordCount * 5, 20) +
+                min(questionCount * 4, 8) +
+                min(numberCount * 3, 9) +
+                min(emotionalCount * 2, 4) +
+                densityScore
+            ).coerceIn(35, 95)
+
+            ScoredSegment(segment.startMs, segment.endMs, score, text, index)
         }
 
-        val segments = transcript.segments.filter { it.text.isNotBlank() }
-        if (segments.isEmpty()) {
-            return ClipAnalysisResult(transcript, emptyList())
-        }
-
+        val ranked = scored.sortedByDescending { it.score }
         val candidates = mutableListOf<AiClipCandidate>()
 
-        for (startIndex in segments.indices) {
-            val start = segments[startIndex].startMs
+        for (anchor in ranked.take(12)) {
+            val selected = mutableListOf<ScoredSegment>()
+            val anchorIndex = anchor.index
 
-            // Tek bir sabit süre hedeflemek yerine 20-90 saniye arasındaki
-            // doğal segment sonlarını değerlendiriyoruz.
-            var endIndex = startIndex
-            while (endIndex < segments.lastIndex) {
-                val duration = segments[endIndex].endMs - start
-                if (duration >= 90_000L) break
-                endIndex++
+            if (anchorIndex > 0) {
+                val prev = scored[anchorIndex - 1]
+                if (prev.endMs - prev.startMs <= 12_000L && prev.score >= 38) {
+                    selected += prev
+                }
             }
+            selected += anchor
 
-            var best: AiClipCandidate? = null
+            val next = ranked
+                .filter { it.index > anchorIndex && it.index - anchorIndex <= 35 }
+                .filter { it.score >= maxOf(48, anchor.score - 12) }
+                .firstOrNull { candidate ->
+                    selected.none { overlap(it, candidate) } &&
+                        candidate.startMs - anchor.endMs <= 75_000L
+                }
 
-            for (candidateEndIndex in startIndex..endIndex) {
-                val end = segments[candidateEndIndex].endMs
-                val duration = end - start
+            if (next != null) selected += next
 
-                if (duration < 20_000L || duration > 90_000L) continue
+            val third = if (next != null) {
+                ranked
+                    .filter { it.index > next.index && it.index - next.index <= 35 }
+                    .filter { it.score >= 50 }
+                    .firstOrNull { candidate ->
+                        selected.none { overlap(it, candidate) } &&
+                            candidate.startMs - next.endMs <= 75_000L
+                    }
+            } else null
 
-                val text = segments
-                    .subList(startIndex, candidateEndIndex + 1)
+            if (third != null) selected += third
+
+            val merged = mergeNearby(
+                selected.sortedBy { it.startMs }.map { ClipSegment(it.startMs, it.endMs) }
+            )
+            val totalDuration = merged.sumOf { it.endMs - it.startMs }
+
+            if (totalDuration !in 25_000L..90_000L) continue
+
+            val combinedText = merged.joinToString(" ") { range ->
+                segments
+                    .filter { it.endMs > range.startMs && it.startMs < range.endMs }
                     .joinToString(" ") { it.text }
-                    .replace(Regex("\\s+"), " ")
-                    .trim()
+            }.replace(Regex("\\s+"), " ").trim()
 
-                val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
-                if (words.size < 30) continue
+            if (combinedText.split(Regex("\\s+")).size < 35) continue
 
-                val keywordCount = KEYWORDS.count { text.contains(it, ignoreCase = true) }
-                val questionCount = Regex("[?]").findAll(text).count()
-                val numberCount = Regex("\\b\\d+(?:[.,]\\d+)?\\b").findAll(text).count()
-                val exclamationCount = Regex("[!]").findAll(text).count()
+            val totalScore = (
+                selected.map { it.score }.average() +
+                min(selected.size * 5, 12)
+            ).toInt().coerceIn(45, 99)
 
-                val wordsPerSecond = words.size.toDouble() / (duration / 1000.0)
-                val speechDensityScore = when {
-                    wordsPerSecond >= 2.2 -> 12
-                    wordsPerSecond >= 1.7 -> 10
-                    wordsPerSecond >= 1.2 -> 7
-                    wordsPerSecond >= 0.8 -> 4
-                    else -> 1
-                }
+            val hook = selected.maxByOrNull { it.score }?.text?.take(130)
+                ?: combinedText.take(130)
 
-                val durationScore = when {
-                    duration in 35_000L..70_000L -> 10
-                    duration in 25_000L..35_000L -> 8
-                    duration in 70_000L..85_000L -> 6
-                    else -> 4
-                }
-
-                val naturalEndingScore = when {
-                    segments[candidateEndIndex].text.trim().endsWithAny(". ! ?") -> 6
-                    else -> 1
-                }
-
-                val payoffScore = when {
-                    keywordCount >= 3 && questionCount >= 1 -> 8
-                    keywordCount >= 3 -> 6
-                    questionCount >= 1 || numberCount >= 1 -> 4
-                    else -> 0
-                }
-
-                val contentScore = (
-                    38 +
-                    min(keywordCount * 4, 16) +
-                    min(questionCount * 3, 9) +
-                    min(numberCount * 2, 8) +
-                    min(exclamationCount * 2, 4) +
-                    speechDensityScore +
-                    durationScore +
-                    naturalEndingScore +
-                    payoffScore
-                ).coerceIn(45, 98)
-
-                val hook = text
-                    .split(Regex("(?<=[.!?])\\s+"))
-                    .firstOrNull { it.isNotBlank() }
-                    ?.trim()
-                    ?.take(130)
-                    ?: words.take(16).joinToString(" ")
-
-                val candidate = AiClipCandidate(
-                    startMs = start,
-                    endMs = end,
-                    score = contentScore,
-                    hook = hook,
-                    reason = "İçerik yoğunluğu, merak unsuru, bilgi değeri ve doğal konuşma bitişi analiz edildi.",
-                    suggestedTitle = buildTitle(hook)
-                )
-
-                // İçerik kalitesi önce gelir. Süre yalnızca ikincil bir faktördür.
-                if (best == null || candidate.score > best!!.score) {
-                    best = candidate
-                }
-            }
-
-            if (best != null) {
-                candidates += best
-            }
+            candidates += AiClipCandidate(
+                startMs = merged.first().startMs,
+                endMs = merged.last().endMs,
+                score = totalScore,
+                hook = hook,
+                reason = if (merged.size > 1) {
+                    "Videonun farklı bölümlerindeki güçlü bilgi, hook ve sonuç anları tek Short'ta birleştirildi."
+                } else {
+                    "Güçlü bilgi ve doğal konuşma bölümü seçildi."
+                },
+                suggestedTitle = buildTitle(hook),
+                segments = merged
+            )
         }
 
-        val selected = candidates
+        val selectedCandidates = candidates
+            .distinctBy { candidate ->
+                candidate.segments.joinToString("|") { segment ->
+                    segment.startMs.toString() + "-" + segment.endMs.toString()
+                }
+            }
             .sortedByDescending { it.score }
             .fold(mutableListOf<AiClipCandidate>()) { acc, candidate ->
-                if (acc.none { overlaps(it, candidate) }) acc += candidate
+                if (acc.none { candidateSegmentsOverlap(it, candidate) }) acc += candidate
                 if (acc.size < 5) acc else acc
             }
 
-        return ClipAnalysisResult(transcript, selected)
+        return ClipAnalysisResult(transcript, selectedCandidates)
     }
 
-    private fun String.endsWithAny(suffixes: String): Boolean {
-        val value = trimEnd()
-        return suffixes.any { value.endsWith(it) }
+    private fun mergeNearby(input: List<ClipSegment>): List<ClipSegment> {
+        if (input.isEmpty()) return emptyList()
+        val out = mutableListOf<ClipSegment>()
+
+        for (segment in input.sortedBy { it.startMs }) {
+            val previous = out.lastOrNull()
+            if (previous != null && segment.startMs - previous.endMs <= 2_500L) {
+                out[out.lastIndex] = ClipSegment(
+                    previous.startMs,
+                    maxOf(previous.endMs, segment.endMs)
+                )
+            } else {
+                out += segment
+            }
+        }
+        return out
     }
 
-    private fun overlaps(a: AiClipCandidate, b: AiClipCandidate): Boolean {
-        val start = maxOf(a.startMs, b.startMs)
-        val end = minOf(a.endMs, b.endMs)
-        if (end <= start) return false
+    private fun overlap(a: ScoredSegment, b: ScoredSegment): Boolean {
+        return minOf(a.endMs, b.endMs) > maxOf(a.startMs, b.startMs)
+    }
 
-        val overlap = end - start
-        val shorter = min(a.endMs - a.startMs, b.endMs - b.startMs)
-        return overlap.toDouble() / shorter > 0.35
+    private fun candidateSegmentsOverlap(a: AiClipCandidate, b: AiClipCandidate): Boolean {
+        return a.segments.any { sa ->
+            b.segments.any { sb ->
+                minOf(sa.endMs, sb.endMs) > maxOf(sa.startMs, sb.startMs)
+            }
+        }
     }
 
     private fun buildTitle(hook: String): String {
@@ -153,11 +170,20 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         return if (clean.length <= 70) clean else clean.take(67).trimEnd() + "..."
     }
 
+    private data class ScoredSegment(
+        val startMs: Long,
+        val endMs: Long,
+        val score: Int,
+        val text: String,
+        val index: Int
+    )
+
     private companion object {
         val KEYWORDS = listOf(
             "önemli", "dikkat", "neden", "nasıl", "çünkü", "sonuç", "sebep",
             "fark", "sorun", "çözüm", "gerçek", "inanılmaz", "şaşırtıcı",
-            "kritik", "tehlike", "avantaj", "dezavantaj", "asıl", "unutmayın"
+            "kritik", "tehlike", "avantaj", "dezavantaj", "asıl", "unutmayın",
+            "aslında", "özellikle", "kesinlikle", "ilk", "son", "en önemli"
         )
     }
 }
