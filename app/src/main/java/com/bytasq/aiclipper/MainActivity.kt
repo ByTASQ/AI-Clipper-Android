@@ -54,6 +54,7 @@ import androidx.media3.effect.Presentation
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
@@ -198,6 +199,12 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     startSeconds = it.startMs / 1000f,
                     endSeconds = it.endMs / 1000f,
                     score = it.score,
+                    segments = it.segments.map { segment ->
+                        ClipSegmentUi(
+                            startSeconds = segment.startMs / 1000f,
+                            endSeconds = segment.endMs / 1000f
+                        )
+                    },
                     hook = it.hook,
                     reason = it.reason,
                     suggestedTitle = it.suggestedTitle
@@ -215,7 +222,10 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     uri = selectedVideo!!,
                     startMs = (candidate.startSeconds * 1000L).toLong(),
                     endMs = (candidate.endSeconds * 1000L).toLong(),
-                    transcript = generatedTranscript
+                    transcript = generatedTranscript,
+                    segments = candidate.segments.map {
+                        it.startSeconds.toLong() * 1000L to it.endSeconds.toLong() * 1000L
+                    }
                 )
                 val clipMetadata = try {
                     LocalClipMetadataEngine().generate(
@@ -654,7 +664,10 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                                     uri = selectedVideo!!,
                                                     startMs = (candidate.startSeconds * 1000L).toLong(),
                                                     endMs = (candidate.endSeconds * 1000L).toLong(),
-                                                    transcript = transcript
+                                                    transcript = transcript,
+                                                    segments = candidate.segments.map {
+                                                        it.startSeconds.toLong() * 1000L to it.endSeconds.toLong() * 1000L
+                                                    }
                                                 )
                                                 val clipMetadata = try {
                                                     LocalClipMetadataEngine().generate(
@@ -883,13 +896,21 @@ private sealed interface YouTubeDownloadState {
     data class Failed(val message: String) : YouTubeDownloadState
 }
 
+private data class ClipSegmentUi(
+    val startSeconds: Float,
+    val endSeconds: Float
+)
+
 private data class ClipCandidate(
     val startSeconds: Float,
     val endSeconds: Float,
     val score: Int,
     val hook: String,
     val reason: String,
-    val suggestedTitle: String
+    val suggestedTitle: String,
+    val segments: List<ClipSegmentUi> = listOf(
+        ClipSegmentUi(startSeconds, endSeconds)
+    )
 )
 
 private data class GeneratedClip(
@@ -1127,10 +1148,15 @@ private suspend fun exportClip(
     uri: Uri,
     startMs: Long,
     endMs: Long,
-    transcript: Transcript?
+    transcript: Transcript?,
+    segments: List<Pair<Long, Long>> = listOf(startMs to endMs)
 ): File = suspendCancellableCoroutine { continuation ->
-    if (endMs <= startMs) {
-        continuation.resumeWithException(IllegalArgumentException("Geçersiz klip aralığı."))
+    val normalizedSegments = segments
+        .map { (start, end) -> start.coerceAtLeast(0L) to end.coerceAtLeast(0L) }
+        .filter { it.second > it.first }
+
+    if (normalizedSegments.isEmpty()) {
+        continuation.resumeWithException(IllegalArgumentException("Geçerli klip bölümü bulunamadı."))
         return@suspendCancellableCoroutine
     }
 
@@ -1140,38 +1166,49 @@ private suspend fun exportClip(
         return@suspendCancellableCoroutine
     }
 
-    val outputFile = File(outputDir, "AIClipper_" + System.currentTimeMillis() + "_" + startMs + ".mp4")
-
-    val clipping = MediaItem.ClippingConfiguration.Builder()
-        .setStartPositionMs(startMs)
-        .setEndPositionMs(endMs)
-        .build()
-    val mediaItem = MediaItem.Builder()
-        .setUri(uri)
-        .setClippingConfiguration(clipping)
-        .build()
-
-    val presentation = Presentation.createForAspectRatio(
-        9f / 16f,
-        Presentation.LAYOUT_SCALE_TO_FIT
+    val outputFile = File(
+        outputDir,
+        "AIClipper_" + System.currentTimeMillis() + "_" + normalizedSegments.first().first + ".mp4"
     )
-    val videoEffects = mutableListOf<Effect>(presentation)
 
-    if (transcript != null && transcript.segments.isNotEmpty()) {
-        videoEffects += OverlayEffect(
-            listOf(
-                SubtitleTextOverlay(
-                    segments = transcript.segments,
-                    clipStartMs = startMs,
-                    clipEndMs = endMs
-                )
+    val editedItems = normalizedSegments.map { (clipStartMs, clipEndMs) ->
+        val clipping = MediaItem.ClippingConfiguration.Builder()
+            .setStartPositionMs(clipStartMs)
+            .setEndPositionMs(clipEndMs)
+            .build()
+
+        val mediaItem = MediaItem.Builder()
+            .setUri(uri)
+            .setClippingConfiguration(clipping)
+            .build()
+
+        val videoEffects = mutableListOf<Effect>(
+            Presentation.createForAspectRatio(
+                9f / 16f,
+                Presentation.LAYOUT_SCALE_TO_FIT
             )
         )
+
+        if (transcript != null && transcript.segments.isNotEmpty()) {
+            videoEffects += OverlayEffect(
+                listOf(
+                    SubtitleTextOverlay(
+                        segments = transcript.segments,
+                        clipStartMs = clipStartMs,
+                        clipEndMs = clipEndMs
+                    )
+                )
+            )
+        }
+
+        EditedMediaItem.Builder(mediaItem)
+            .setEffects(Effects(emptyList(), videoEffects))
+            .build()
     }
 
-    val editedMediaItem = EditedMediaItem.Builder(mediaItem)
-        .setEffects(Effects(emptyList(), videoEffects))
-        .build()
+    // Birden fazla kaynak bölümünü ardışık olarak tek MP4 halinde birleştir.
+    val sequence = EditedMediaItemSequence(editedItems)
+    val composition = Composition.Builder(sequence).build()
 
     val transformer = Transformer.Builder(context)
         .setVideoMimeType(MimeTypes.VIDEO_H264)
@@ -1208,7 +1245,7 @@ private suspend fun exportClip(
         outputFile.delete()
     }
 
-    transformer.start(editedMediaItem, outputFile.absolutePath)
+    transformer.start(composition, outputFile.absolutePath)
 }
 
 @OptIn(UnstableApi::class)
