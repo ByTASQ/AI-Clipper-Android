@@ -155,7 +155,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
 
     LaunchedEffect(autoProcessYoutube, selectedVideo, videoDurationMs) {
         if (!autoProcessYoutube || selectedVideo == null || videoDurationMs <= 0L) return@LaunchedEffect
-        autoProcessYoutube = false
         try {
             analysisState = AnalysisState.Analyzing
             analysisError = null
@@ -214,11 +213,13 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             }
             batchExportState = BatchExportState.Completed(created.size)
             youtubeDownloadState = YouTubeDownloadState.Completed
+            autoProcessYoutube = false
         } catch (e: Exception) {
             analysisState = AnalysisState.Idle
             batchExportState = BatchExportState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
             youtubeDownloadState = YouTubeDownloadState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
             analysisError = e.message ?: "Otomatik işlem sırasında hata oluştu."
+            autoProcessYoutube = false
         }
     }
 
