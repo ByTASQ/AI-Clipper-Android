@@ -16,7 +16,7 @@ def download(url, output_dir, cookie_file=None, user_agent=None):
         "fragment_retries": 5,
         "extractor_retries": 3,
         "forceipv4": True,
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
         "extractor_args": {
             "youtube": {
