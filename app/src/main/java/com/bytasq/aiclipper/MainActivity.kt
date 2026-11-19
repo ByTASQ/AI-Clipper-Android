@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButton\nimport androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -118,7 +118,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var transcriptText by remember { mutableStateOf("") }
     var transcript by remember { mutableStateOf<Transcript?>(null) }
-    var analysisError by remember { mutableStateOf<String?>(null) }
+    var analysisError by remember { mutableStateOf<String?>(null) }\n    var analysisProgress by remember { mutableStateOf(0f) }\n    var analysisStatus by remember { mutableStateOf("Hazırlanıyor...") }
     var generatedClips by remember { mutableStateOf<List<GeneratedClip>>(emptyList()) }
     var batchExportState by remember { mutableStateOf<BatchExportState>(BatchExportState.Idle) }
     val scope = rememberCoroutineScope()
