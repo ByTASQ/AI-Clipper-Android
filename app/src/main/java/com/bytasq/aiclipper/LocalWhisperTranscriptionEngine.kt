@@ -16,7 +16,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.roundToLong
 
-class LocalWhisperTranscriptionEngine(private val context: Context) : TranscriptionEngine {
+class LocalWhisperTranscriptionEngine(\n    private val context: Context,\n    private val onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }\n) : TranscriptionEngine {
     override suspend fun transcribe(videoUri: Uri): Transcript = withContext(Dispatchers.Default) {
         val modelDir = WhisperModelManager(context).ensureModel()
         val durationMs = videoDuration(videoUri)
