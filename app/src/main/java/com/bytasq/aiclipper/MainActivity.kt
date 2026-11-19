@@ -1046,7 +1046,7 @@ private fun GeneratedClipVideoPreview(
             PlayerView(it).apply {
                 this.player = player
                 useController = true
-                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
             }
         },
         modifier = Modifier
@@ -1142,7 +1142,7 @@ private suspend fun exportClip(
 
     val presentation = Presentation.createForAspectRatio(
         9f / 16f,
-        Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
+        Presentation.LAYOUT_SCALE_TO_FIT
     )
     val videoEffects = mutableListOf<Effect>(presentation)
 
@@ -1278,7 +1278,7 @@ private fun VideoPreview(
             PlayerView(it).apply {
                 this.player = player
                 useController = true
-                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
             }
         },
         modifier = Modifier.fillMaxSize()
