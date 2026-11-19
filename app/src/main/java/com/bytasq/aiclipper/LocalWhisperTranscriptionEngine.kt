@@ -27,6 +27,9 @@ class LocalWhisperTranscriptionEngine(
 
         val segments = mutableListOf<TranscriptSegment>()
         var startMs = 0L
+        val totalChunks = ((durationMs + 29_999L) / 30_000L).toInt()
+        var currentChunk = 0
+        onProgress(0, totalChunks)
 
         while (startMs < durationMs) {
             val endMs = minOf(startMs + 30_000L, durationMs)
@@ -44,6 +47,8 @@ class LocalWhisperTranscriptionEngine(
                 pcm.delete()
             }
             startMs = endMs
+            currentChunk++
+            onProgress(currentChunk, totalChunks)
         }
 
         Transcript(mergeAdjacentSegments(segments))
