@@ -264,7 +264,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             clipRange = 0f..0f
             playSelection = false
             playPreview = true
-            batchExportState = BatchExportState.Exporting(1, 1)
+            batchExportState = BatchExportState.Completed(1)
 
             youtubeDownloadState = YouTubeDownloadState.Completed
             autoProcessYoutube = false
@@ -584,9 +584,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             }
         )
     }
-    }
 }
-
 
 private sealed interface YouTubeDownloadState {
     data object Idle : YouTubeDownloadState
