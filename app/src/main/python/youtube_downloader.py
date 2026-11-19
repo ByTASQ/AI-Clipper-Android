@@ -1,10 +1,11 @@
 import os
+import time
 import yt_dlp
 
 def download(url, output_dir, cookie_file=None, user_agent=None):
     os.makedirs(output_dir, exist_ok=True)
 
-    output = os.path.join(output_dir, "aiclipper_source.%(ext)s")
+    output = os.path.join(output_dir, "aiclipper_source_%d.%%(ext)s" % time.time_ns())
 
     options = {
         "outtmpl": output,
