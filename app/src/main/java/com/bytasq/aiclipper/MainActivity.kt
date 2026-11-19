@@ -105,6 +105,8 @@ private fun extractSharedYoutubeUrl(intent: Intent?): String? {
 @Composable
 private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var selectedVideo by remember { mutableStateOf<Uri?>(null) }
+    var previewVideo by remember { mutableStateOf<Uri?>(null) }
+    var playPreview by remember { mutableStateOf(false) }
     var sharedYoutubeUrl by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
     var youtubeUrlInput by remember(initialYoutubeUrl) { mutableStateOf(initialYoutubeUrl.orEmpty()) }
     var youtubeDownloadState by remember { mutableStateOf<YouTubeDownloadState>(YouTubeDownloadState.Idle) }
@@ -138,6 +140,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             // Her yeni istek, daha önce seçilmiş/indirilmiş videodan bağımsız olarak
             // doğrudan girilen URL'yi yeniden indirir. Eski selectedVideo kullanılamaz.
             selectedVideo = null
+            previewVideo = null
+            playPreview = false
             videoDurationMs = 0L
             clipRange = 0f..0f
             transcriptText = ""
@@ -152,6 +156,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                         youtubeDownloadState = YouTubeDownloadState.Downloading(progress)
                     }
                     selectedVideo = Uri.fromFile(file)
+                    previewVideo = selectedVideo
+                    playPreview = false
                     analysisState = AnalysisState.Idle
                     transcriptText = ""
                     transcript = null
@@ -234,6 +240,10 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     score = candidate.score
                 )
                 generatedClips = created.toList()
+                if (index == 0) {
+                    previewVideo = Uri.fromFile(file)
+                    playPreview = true
+                }
                 batchExportState = BatchExportState.Exporting(index + 1, candidates.size)
             }
             batchExportState = BatchExportState.Completed(created.size)
@@ -261,6 +271,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
         selectedVideo = uri
+        previewVideo = uri
+        playPreview = false
         analysisState = AnalysisState.Idle
         transcriptText = ""
         transcript = null
@@ -438,7 +450,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                 }
                             }
                             YouTubeDownloadState.Completed -> Text(
-                                "✓ YouTube işlemi tamamlandı.",
+                                "✓ AI klipleri hazır: " + generatedClips.size + " klip",
                                 style = MaterialTheme.typography.labelMedium
                             )
                             is YouTubeDownloadState.Failed -> {
@@ -462,43 +474,56 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
 
 
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(420.dp),
-                    contentAlignment = Alignment.Center
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Card(
+                    Text(
+                        if (generatedClips.isNotEmpty()) "Oluşturulan klip önizlemesi" else "Video önizlemesi",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                    Box(
                         modifier = Modifier
-                            .height(420.dp)
-                            .aspectRatio(9f / 16f)
+                            .fillMaxWidth()
+                            .height(420.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        if (selectedVideo != null) {
-                            VideoPreview(
-                                uri = selectedVideo!!,
-                                clipRange = clipRange,
-                                playSelection = playSelection,
-                                onPlaySelectionConsumed = { playSelection = false },
-                                onDurationChanged = { duration ->
-                                    if (duration > 0L && duration != videoDurationMs) {
-                                        videoDurationMs = duration
-                                        clipRange = 0f..(duration / 1000f)
+                        Card(
+                            modifier = Modifier
+                                .height(420.dp)
+                                .aspectRatio(9f / 16f)
+                        ) {
+                            val previewUri = previewVideo ?: selectedVideo
+                            if (previewUri != null) {
+                                VideoPreview(
+                                    uri = previewUri,
+                                    clipRange = clipRange,
+                                    playSelection = playSelection,
+                                    autoPlay = playPreview,
+                                    onAutoPlayConsumed = { playPreview = false },
+                                    onPlaySelectionConsumed = { playSelection = false },
+                                    onDurationChanged = { duration ->
+                                        if (previewUri == selectedVideo && duration > 0L && duration != videoDurationMs) {
+                                            videoDurationMs = duration
+                                            clipRange = 0f..(duration / 1000f)
+                                        }
                                     }
-                                }
-                            )
-                        } else {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(Icons.Default.VideoLibrary, contentDescription = null)
-                                    Spacer(Modifier.height(10.dp))
-                                    Text("Henüz video seçilmedi")
-                                    Text(
-                                        "9:16 Shorts önizleme",
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Default.VideoLibrary, contentDescription = null)
+                                        Spacer(Modifier.height(10.dp))
+                                        Text("Henüz video seçilmedi")
+                                        Text(
+                                            "9:16 Shorts önizleme",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1207,6 +1232,8 @@ private fun VideoPreview(
     uri: Uri,
     clipRange: ClosedFloatingPointRange<Float>,
     playSelection: Boolean,
+    autoPlay: Boolean = false,
+    onAutoPlayConsumed: () -> Unit = {},
     onPlaySelectionConsumed: () -> Unit,
     onDurationChanged: (Long) -> Unit
 ) {
@@ -1215,7 +1242,7 @@ private fun VideoPreview(
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(uri))
             prepare()
-            playWhenReady = false
+            playWhenReady = autoPlay
         }
     }
 
@@ -1228,6 +1255,14 @@ private fun VideoPreview(
             val duration = player.duration
             if (duration > 0L) onDurationChanged(duration)
             delay(250)
+        }
+    }
+
+    LaunchedEffect(autoPlay) {
+        if (autoPlay) {
+            player.seekTo(0L)
+            player.playWhenReady = true
+            onAutoPlayConsumed()
         }
     }
 
