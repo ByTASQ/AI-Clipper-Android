@@ -444,7 +444,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                 onDurationChanged = { duration ->
                                     if (duration > 0L && duration != videoDurationMs) {
                                         videoDurationMs = duration
-                                        clipRange = 0f..duration.toFloat()
+                                        clipRange = 0f..(duration / 1000f)
                                     }
                                 }
                             )
