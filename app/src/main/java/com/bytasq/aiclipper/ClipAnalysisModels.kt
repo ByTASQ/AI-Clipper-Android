@@ -15,5 +15,5 @@ data class ClipAnalysisResult(
 )
 
 interface ClipAnalysisEngine {
-    suspend fun analyze(transcript: Transcript, targetDurationMs: Long = 60_000L): ClipAnalysisResult
+    suspend fun analyze(transcript: Transcript): ClipAnalysisResult
 }
