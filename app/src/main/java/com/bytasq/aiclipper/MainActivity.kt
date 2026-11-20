@@ -807,7 +807,7 @@ private fun GeneratedClipVideoPreview(
             PlayerView(it).apply {
                 this.player = player
                 useController = true
-                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             }
         },
         modifier = Modifier
@@ -911,25 +911,19 @@ private suspend fun exportClip(
             .setClippingConfiguration(clipping)
             .build()
 
+        // Short çıktısı 9:16 doldurur. Siyah bant bırakmak yerine kadrajı
+        // dikey formata dolduracak şekilde ölçekler; kaynak videonun ortasındaki
+        // ana görüntü korunur.
         val videoEffects = mutableListOf<Effect>(
             Presentation.createForAspectRatio(
                 9f / 16f,
-                Presentation.LAYOUT_SCALE_TO_FIT
+                Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
             )
         )
 
-        if (transcript != null && transcript.segments.isNotEmpty()) {
-            videoEffects += OverlayEffect(
-                listOf(
-                    SubtitleTextOverlay(
-                        segments = transcript.segments,
-                        clipStartMs = clipStartMs,
-                        clipEndMs = clipEndMs
-                    )
-                )
-            )
-        }
-
+        // Kaynak videodaki veya hatalı otomatik transkriptteki yazıları tekrar
+        // videonun üzerine bindirmiyoruz. Böylece Çince/bozuk otomatik altyazı
+        // görüntünün üzerine eklenmez.
         EditedMediaItem.Builder(mediaItem)
             .setEffects(Effects(emptyList(), videoEffects))
             .build()
