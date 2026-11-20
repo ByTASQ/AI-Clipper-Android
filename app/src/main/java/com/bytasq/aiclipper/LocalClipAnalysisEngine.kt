@@ -87,7 +87,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             )
             val totalDuration = merged.sumOf { it.endMs - it.startMs }
 
-            if (totalDuration !in 25_000L..90_000L) continue
+            if (totalDuration !in 30_000L..120_000L) continue
 
             val combinedText = merged.joinToString(" ") { range ->
                 segments
@@ -148,7 +148,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 .let { mergeNearby(it) }
                 .toMutableList()
 
-            while (fallbackSegments.sumOf { it.endMs - it.startMs } < 25_000L) {
+            while (fallbackSegments.sumOf { it.endMs - it.startMs } < 30_000L) {
                 val base = fallbackSegments.lastOrNull()
                 val next = if (base != null) {
                     segments.firstOrNull { it.startMs > base.endMs }
@@ -166,7 +166,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                     val out = mutableListOf<ClipSegment>()
                     var total = 0L
                     for (segment in list) {
-                        val remaining = 90_000L - total
+                        val remaining = 120_000L - total
                         if (remaining <= 0L) break
                         val duration = segment.endMs - segment.startMs
                         if (duration <= remaining) {
