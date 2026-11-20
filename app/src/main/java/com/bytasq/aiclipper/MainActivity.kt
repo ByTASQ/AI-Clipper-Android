@@ -180,12 +180,36 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             analysisError = null
             analysisProgress = 0f
             analysisStatus = "Video hazırlanıyor..."
-            val generatedTranscript = LocalWhisperTranscriptionEngine(context) { current, total ->
-                scope.launch {
-                    analysisProgress = current.toFloat() / total.toFloat()
-                    analysisStatus = "Transkript çıkarılıyor... %$current/$total"
+            val generatedTranscript = if (sharedYoutubeUrl.isNotBlank()) {
+                try {
+                    analysisStatus = "YouTube transkripti alınıyor..."
+                    YouTubeTranscriptTranscriptionEngine(sharedYoutubeUrl) { current, total ->
+                        scope.launch {
+                            analysisProgress = current.toFloat() / total.toFloat()
+                            analysisStatus = if (current >= total) {
+                                "YouTube transkripti alındı."
+                            } else {
+                                "YouTube transkripti alınıyor..."
+                            }
+                        }
+                    }.transcribe(selectedVideo!!)
+                } catch (_: Exception) {
+                    analysisStatus = "YouTube transkripti alınamadı, ses analizi yapılıyor..."
+                    LocalWhisperTranscriptionEngine(context) { current, total ->
+                        scope.launch {
+                            analysisProgress = current.toFloat() / total.toFloat()
+                            analysisStatus = "Ses transkripti çıkarılıyor... %$current/$total"
+                        }
+                    }.transcribe(selectedVideo!!)
                 }
-            }.transcribe(selectedVideo!!)
+            } else {
+                LocalWhisperTranscriptionEngine(context) { current, total ->
+                    scope.launch {
+                        analysisProgress = current.toFloat() / total.toFloat()
+                        analysisStatus = "Ses transkripti çıkarılıyor... %$current/$total"
+                    }
+                }.transcribe(selectedVideo!!)
+            }
             transcript = generatedTranscript
             transcriptText = generatedTranscript.fullText
             analysisProgress = 0.95f
