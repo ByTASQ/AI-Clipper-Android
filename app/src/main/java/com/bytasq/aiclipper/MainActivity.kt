@@ -232,6 +232,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     reason = it.reason,
                     suggestedTitle = it.suggestedTitle
                 )
+                }
             } else if (generatedTranscript.segments.isEmpty()) {
                 buildFallbackCandidates(context, selectedVideo!!)
             } else {
