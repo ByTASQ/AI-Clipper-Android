@@ -132,6 +132,68 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 if (acc.size < 5) acc else acc
             }
 
+        // Çok kısa/seyrek transkriptlerde sıkı 25–90 sn filtresi
+        // hiçbir aday bırakabilir. Bu durumda yine gerçek transkript
+        // bölümlerinden bir Short oluştur.
+        if (selectedCandidates.isEmpty() && ranked.isNotEmpty()) {
+            val fallbackSegments = ranked
+                .take(6)
+                .sortedBy { it.startMs }
+                .map { anchor ->
+                    ClipSegment(
+                        (anchor.startMs - 3_000L).coerceAtLeast(0L),
+                        (anchor.endMs + 5_000L).coerceAtMost(transcript.segments.maxOf { it.endMs })
+                    )
+                }
+                .let { mergeNearby(it) }
+                .toMutableList()
+
+            while (fallbackSegments.sumOf { it.endMs - it.startMs } < 25_000L) {
+                val base = fallbackSegments.lastOrNull()
+                val next = if (base != null) {
+                    segments.firstOrNull { it.startMs > base.endMs }
+                } else null
+
+                if (next == null) break
+
+                val expandedEnd = minOf(next.endMs, next.startMs + 8_000L)
+                fallbackSegments += ClipSegment(next.startMs, expandedEnd)
+            }
+
+            val limitedSegments = fallbackSegments
+                .sortedBy { it.startMs }
+                .let { list ->
+                    val out = mutableListOf<ClipSegment>()
+                    var total = 0L
+                    for (segment in list) {
+                        val remaining = 90_000L - total
+                        if (remaining <= 0L) break
+                        val duration = segment.endMs - segment.startMs
+                        if (duration <= remaining) {
+                            out += segment
+                            total += duration
+                        } else {
+                            out += ClipSegment(segment.startMs, segment.startMs + remaining)
+                            break
+                        }
+                    }
+                    out
+                }
+
+            if (limitedSegments.isNotEmpty()) {
+                val fallbackScore = ranked.take(6).map { it.score }.average().toInt().coerceIn(45, 85)
+                selectedCandidates += AiClipCandidate(
+                    startMs = limitedSegments.first().startMs,
+                    endMs = limitedSegments.last().endMs,
+                    score = fallbackScore,
+                    hook = ranked.first().text.take(130),
+                    reason = "Konuşma içindeki en güçlü bölümler seçilip tek Short'ta birleştirildi.",
+                    suggestedTitle = buildTitle(ranked.first().text),
+                    segments = limitedSegments
+                )
+            }
+        }
+
         return ClipAnalysisResult(transcript, selectedCandidates)
     }
 
