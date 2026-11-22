@@ -100,9 +100,12 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
             while (
                 lastIndex + 1 < scored.size &&
-                scored[lastIndex].endMs - scored[firstIndex].startMs < 60_000L
+                scored[lastIndex].endMs - scored[firstIndex].startMs < 120_000L
             ) {
-                if (hasConclusionSignal(scored[lastIndex].text)) break
+                val currentDuration = scored[lastIndex].endMs - scored[firstIndex].startMs
+                if (currentDuration >= 45_000L && hasConclusionSignal(scored[lastIndex].text)) {
+                    break
+                }
                 lastIndex++
             }
 
