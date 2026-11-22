@@ -135,6 +135,13 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var uploadingClipPath by remember { mutableStateOf<String?>(null) }
     var publishedVideoIds by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    val openAiPrefs = remember(context) {
+        context.getSharedPreferences("ai_clipper_prefs", android.content.Context.MODE_PRIVATE)
+    }
+    var openAiApiKey by remember {
+        mutableStateOf(openAiPrefs.getString("openai_api_key", "").orEmpty())
+    }
+    var profileApiKey by remember { mutableStateOf(openAiApiKey) }
 
     LaunchedEffect(sharedYoutubeUrl, youtubeRequestId) {
         if (sharedYoutubeUrl.isNotBlank()) {
@@ -216,7 +223,10 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             analysisProgress = 0.95f
             analysisStatus = "Konuşma analizi tamamlandı. Klip adayları hesaplanıyor..."
 
-            val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
+            analysisStatus = "Videonun tamamı AI ile özetleniyor..."
+            val result = OpenAiClipAnalysisEngine(
+                apiKey = openAiApiKey
+            ).analyze(generatedTranscript)
             val candidates = if (result.candidates.isNotEmpty()) {
                 result.candidates.map {
                 ClipCandidate(
@@ -357,38 +367,68 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             if (showProfileDialog) {
                 AlertDialog(
                     onDismissRequest = { showProfileDialog = false },
-                    title = { Text("YouTube Hesabı") },
+                    title = { Text("Profil") },
                     text = {
-                        Text(
-                            youtubeAccount?.email?.let { "Bağlı hesap:\n$it" }
-                                ?: "YouTube hesabı bağlı değil."
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                youtubeAccount?.email?.let { "YouTube: $it" }
+                                    ?: "YouTube hesabı bağlı değil."
+                            )
+
+                            TextField(
+                                value = profileApiKey,
+                                onValueChange = { profileApiKey = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("OpenAI API anahtarı") },
+                                placeholder = { Text("sk-...") },
+                                singleLine = true
+                            )
+
+                            Text(
+                                "Video özeti için OpenAI anahtarı gerekir. Anahtar yalnızca cihazda saklanır.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            TextButton(
+                                onClick = {
+                                    showProfileDialog = false
+                                    youtubePublisher.signOut {
+                                        youtubeLauncher.launch(youtubePublisher.signInIntent())
+                                    }
+                                }
+                            ) {
+                                Text(if (youtubeAccount == null) "YouTube hesabına giriş yap" else "YouTube hesabını değiştir")
+                            }
+
+                            if (youtubeAccount != null) {
+                                TextButton(
+                                    onClick = {
+                                        youtubePublisher.signOut {
+                                            youtubeAccount = null
+                                            youtubeStatus = "YouTube hesabından çıkış yapıldı."
+                                        }
+                                    }
+                                ) {
+                                    Text("YouTube hesabından çıkış yap")
+                                }
+                            }
+                        }
                     },
                     confirmButton = {
                         Button(
                             onClick = {
+                                val key = profileApiKey.trim()
+                                openAiPrefs.edit().putString("openai_api_key", key).apply()
+                                openAiApiKey = key
                                 showProfileDialog = false
-                                youtubePublisher.signOut {
-                                    youtubeLauncher.launch(youtubePublisher.signInIntent())
-                                }
                             }
                         ) {
-                            Text(if (youtubeAccount == null) "Giriş Yap" else "Hesap Değiştir")
+                            Text("Kaydet")
                         }
                     },
                     dismissButton = {
-                        if (youtubeAccount != null) {
-                            TextButton(
-                                onClick = {
-                                    youtubePublisher.signOut {
-                                        youtubeAccount = null
-                                        youtubeStatus = "YouTube hesabından çıkış yapıldı."
-                                    }
-                                    showProfileDialog = false
-                                }
-                            ) {
-                                Text("Çıkış Yap")
-                            }
+                        TextButton(onClick = { showProfileDialog = false }) {
+                            Text("Kapat")
                         }
                     }
                 )
