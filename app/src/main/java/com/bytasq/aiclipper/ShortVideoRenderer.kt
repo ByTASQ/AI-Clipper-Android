@@ -3,6 +3,7 @@ package com.bytasq.aiclipper
 import android.content.Context
 import android.net.Uri
 import android.os.Environment
+import com.yausername.ffmpeg.FFmpeg
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
@@ -188,14 +189,35 @@ object ShortVideoRenderer {
         context: Context,
         args: List<String>
     ) {
-        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
-        val ffmpeg = listOf("libffmpeg.so", "libffmpeg.zip.so")
-            .map { File(nativeDir, it) }
-            .firstOrNull { it.isFile }
+        // youtubedl-android packages FFmpeg as an executable plus a zipped set
+        // of shared libraries. The executable cannot run directly from
+        // nativeLibraryDir because dependencies such as libavdevice.so.61 are
+        // intentionally unpacked at runtime by FFmpeg.init().
+        try {
+            FFmpeg.init(context.applicationContext)
+        } catch (e: Exception) {
+            throw IllegalStateException(
+                "FFmpeg bileşeni başlatılamadı: " + (e.message ?: e.javaClass.simpleName),
+                e
+            )
+        }
 
-        if (ffmpeg == null) {
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
+        val ffmpeg = File(nativeDir, "libffmpeg.so")
+        val extractedLibDir = File(
+            context.noBackupFilesDir,
+            "youtubedl-android/packages/ffmpeg/usr/lib"
+        )
+
+        if (!ffmpeg.isFile) {
             throw IllegalStateException(
                 "FFmpeg çalışma dosyası bulunamadı. APK içindeki FFmpeg bileşeni başlatılamadı."
+            )
+        }
+
+        if (!extractedLibDir.isDirectory) {
+            throw IllegalStateException(
+                "FFmpeg kütüphaneleri çıkarılamadı: " + extractedLibDir.absolutePath
             )
         }
 
@@ -203,11 +225,16 @@ object ShortVideoRenderer {
             ffmpeg.setExecutable(true)
         }
 
+        val libraryPath = listOf(
+            nativeDir.absolutePath,
+            extractedLibDir.absolutePath
+        ).joinToString(File.pathSeparator)
+
         val process = ProcessBuilder(listOf(ffmpeg.absolutePath) + args)
-            .directory(nativeDir)
+            .directory(extractedLibDir)
             .redirectErrorStream(true)
             .apply {
-                environment()["LD_LIBRARY_PATH"] = nativeDir.absolutePath
+                environment()["LD_LIBRARY_PATH"] = libraryPath
             }
             .start()
 
