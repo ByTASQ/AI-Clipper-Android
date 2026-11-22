@@ -221,6 +221,26 @@ object ShortVideoRenderer {
             )
         }
 
+        // youtubedl-android 0.18.x ships librubberband.so, which depends on
+        // libc++_shared.so but does not include that runtime in its FFmpeg
+        // payload. Android extracts our ABI-matched libc++_shared.so into
+        // nativeLibraryDir; copy it into FFmpeg's private usr/lib directory
+        // so the child executable can resolve it through LD_LIBRARY_PATH.
+        val libcxxSource = File(nativeDir, "libc++_shared.so")
+        val libcxxTarget = File(extractedLibDir, "libc++_shared.so")
+        if (!libcxxTarget.isFile) {
+            if (!libcxxSource.isFile) {
+                throw IllegalStateException(
+                    "libc++_shared.so bulunamadı. APK native kütüphane paketlemesi eksik."
+                )
+            }
+            libcxxSource.inputStream().use { input ->
+                libcxxTarget.outputStream().use { output ->
+                    input.copyTo(output, 1024 * 1024)
+                }
+            }
+        }
+
         if (!ffmpeg.canExecute()) {
             ffmpeg.setExecutable(true)
         }
