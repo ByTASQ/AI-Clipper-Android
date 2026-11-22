@@ -127,8 +127,8 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
             val score = (
                 chosen.map { it.score }.average() +
-                    if (hasOpening) 8 else 0 +
-                    if (hasConclusion) 18 else 0 +
+                    (if (hasOpening) 8 else 0) +
+                    (if (hasConclusion) 18 else 0) +
                     continuity * 4 +
                     min(coverage * 20.0, 12.0)
                 ).toInt().coerceIn(45, 99)
