@@ -20,7 +20,12 @@ val downloadSherpaOnnxAar = tasks.register("downloadSherpaOnnxAar") {
 }
 
 val stageLibcxxShared = tasks.register("stageLibcxxShared") {
-    val abis = listOf("x86", "x86_64", "armeabi-v7a", "arm64-v8a")
+    val abiToNdkTriple = mapOf(
+        "x86" to "i686-linux-android",
+        "x86_64" to "x86_64-linux-android",
+        "armeabi-v7a" to "arm-linux-androideabi",
+        "arm64-v8a" to "aarch64-linux-android"
+    )
     val sdkRoot = System.getenv("ANDROID_SDK_ROOT")
         ?: System.getenv("ANDROID_HOME")
         ?: throw GradleException("ANDROID_SDK_ROOT/ANDROID_HOME bulunamadı.")
@@ -39,9 +44,9 @@ val stageLibcxxShared = tasks.register("stageLibcxxShared") {
             "linux-x86_64"
         }
 
-        abis.forEach { abi ->
+        abiToNdkTriple.forEach { (abi, triple) ->
             val source = file(
-                "$ndkHome/toolchains/llvm/prebuilt/$hostTag/sysroot/usr/lib/$abi/libc++_shared.so"
+                "$ndkHome/toolchains/llvm/prebuilt/$hostTag/sysroot/usr/lib/$triple/libc++_shared.so"
             )
             val destination = file("src/main/jniLibs/$abi/libc++_shared.so")
             if (!source.isFile) {
@@ -55,6 +60,7 @@ val stageLibcxxShared = tasks.register("stageLibcxxShared") {
 
 tasks.named("preBuild") {
     dependsOn(downloadSherpaOnnxAar)
+    dependsOn(stageLibcxxShared)
 }
 
 android {
