@@ -135,13 +135,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var uploadingClipPath by remember { mutableStateOf<String?>(null) }
     var publishedVideoIds by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var showProfileDialog by remember { mutableStateOf(false) }
-    val openAiPrefs = remember(context) {
-        context.getSharedPreferences("ai_clipper_prefs", android.content.Context.MODE_PRIVATE)
-    }
-    var openAiApiKey by remember {
-        mutableStateOf(openAiPrefs.getString("openai_api_key", "").orEmpty())
-    }
-    var profileApiKey by remember { mutableStateOf(openAiApiKey) }
 
     LaunchedEffect(sharedYoutubeUrl, youtubeRequestId) {
         if (sharedYoutubeUrl.isNotBlank()) {
@@ -223,10 +216,8 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             analysisProgress = 0.95f
             analysisStatus = "Konuşma analizi tamamlandı. Klip adayları hesaplanıyor..."
 
-            analysisStatus = "Videonun tamamı AI ile özetleniyor..."
-            val result = OpenAiClipAnalysisEngine(
-                apiKey = openAiApiKey
-            ).analyze(generatedTranscript)
+            analysisStatus = "Video yerel olarak özetleniyor..."
+            val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
             val candidates = if (result.candidates.isNotEmpty()) {
                 result.candidates.map {
                 ClipCandidate(
@@ -375,20 +366,6 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                     ?: "YouTube hesabı bağlı değil."
                             )
 
-                            TextField(
-                                value = profileApiKey,
-                                onValueChange = { profileApiKey = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("OpenAI API anahtarı") },
-                                placeholder = { Text("sk-...") },
-                                singleLine = true
-                            )
-
-                            Text(
-                                "Video özeti için OpenAI anahtarı gerekir. Anahtar yalnızca cihazda saklanır.",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-
                             TextButton(
                                 onClick = {
                                     showProfileDialog = false
@@ -415,22 +392,11 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                         }
                     },
                     confirmButton = {
-                        Button(
-                            onClick = {
-                                val key = profileApiKey.trim()
-                                openAiPrefs.edit().putString("openai_api_key", key).apply()
-                                openAiApiKey = key
-                                showProfileDialog = false
-                            }
-                        ) {
-                            Text("Kaydet")
-                        }
-                    },
-                    dismissButton = {
                         TextButton(onClick = { showProfileDialog = false }) {
                             Text("Kapat")
                         }
-                    }
+                    },
+                    dismissButton = {}
                 )
             }
 
