@@ -201,17 +201,21 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             endIndex++
         }
 
-        if (bestEnd < startIndex) return null
+        // Altyazı çok kısa, noktalamasız veya zaman damgaları seyrek olabilir.
+        // Bu durumda aday üretmeyi tamamen reddetmek yerine mevcut anlatıyı koru.
+        if (bestEnd < startIndex) {
+            bestEnd = startIndex
+        }
 
         val narrative = scored.subList(startIndex, bestEnd + 1)
         val startMs = narrative.first().startMs
         val endMs = narrative.last().endMs
         val duration = endMs - startMs
-        if (duration !in 15_000L..180_000L) return null
+
+        if (duration <= 0L) return null
 
         val text = narrative.joinToString(" ") { it.text }
         val words = text.split(Regex("\\s+")).count { it.isNotBlank() }
-        if (words < 20) return null
 
         return AiClipCandidate(
             startMs = startMs,
