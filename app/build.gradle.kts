@@ -143,7 +143,7 @@ dependencies {
     implementation(files(sherpaOnnxAar))
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
