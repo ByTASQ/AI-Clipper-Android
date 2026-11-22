@@ -210,7 +210,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         if (duration !in 15_000L..180_000L) return null
 
         val text = narrative.joinToString(" ") { it.text }
-        val words = text.split(Regex("\s+")).count { it.isNotBlank() }
+        val words = text.split(Regex("\\s+")).count { it.isNotBlank() }
         if (words < 20) return null
 
         return AiClipCandidate(
