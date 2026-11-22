@@ -19,6 +19,33 @@ val downloadSherpaOnnxAar = tasks.register("downloadSherpaOnnxAar") {
     }
 }
 
+val stageLibcxxShared = tasks.register("stageLibcxxShared") {
+    val abis = listOf("x86", "x86_64", "armeabi-v7a", "arm64-v8a")
+    val ndkHome = System.getenv("ANDROID_NDK_HOME")
+        ?: System.getenv("ANDROID_NDK_ROOT")
+        ?: "${System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME")}/ndk/27.2.12479018"
+
+    doLast {
+        val hostTag = if (System.getProperty("os.name").lowercase().contains("windows")) {
+            "windows-x86_64"
+        } else {
+            "linux-x86_64"
+        }
+
+        abis.forEach { abi ->
+            val source = file(
+                "$ndkHome/toolchains/llvm/prebuilt/$hostTag/sysroot/usr/lib/$abi/libc++_shared.so"
+            )
+            val destination = file("src/main/jniLibs/$abi/libc++_shared.so")
+            if (!source.isFile) {
+                throw GradleException("NDK libc++_shared.so bulunamadı: ${source.absolutePath}")
+            }
+            destination.parentFile.mkdirs()
+            source.copyTo(destination, overwrite = true)
+        }
+    }
+}
+
 tasks.named("preBuild") {
     dependsOn(downloadSherpaOnnxAar)
 }
