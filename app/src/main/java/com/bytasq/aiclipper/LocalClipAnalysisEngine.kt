@@ -16,14 +16,24 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
         if (segments.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
 
-        val scored = segments.mapIndexed { index, segment ->
+        val scored = scoreSegments(segments)
+        val blocks = buildTopicBlocks(scored)
+        if (blocks.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
+
+        val candidates = buildSummaryCandidates(scored, blocks)
+        return ClipAnalysisResult(transcript, candidates.sortedByDescending { it.score }.take(3))
+    }
+
+    private fun scoreSegments(segments: List<TranscriptSegment>): List<ScoredSegment> {
+        return segments.mapIndexed { index, segment ->
             val text = segment.text.replace(Regex("\\s+"), " ").trim()
             val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
             val keywordCount = KEYWORDS.count { text.contains(it, ignoreCase = true) }
             val questionCount = Regex("[?]").findAll(text).count()
             val numberCount = Regex("\\b\\d+(?:[.,]\\d+)?\\b").findAll(text).count()
             val emotionalCount = Regex("[!]").findAll(text).count()
-            val density = words.size.toDouble() / ((segment.endMs - segment.startMs) / 1000.0)
+            val durationSec = ((segment.endMs - segment.startMs) / 1000.0).coerceAtLeast(0.5)
+            val density = words.size.toDouble() / durationSec
 
             val densityScore = when {
                 density >= 2.2 -> 15
@@ -35,128 +45,156 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
             val score = (
                 35 +
-                min(keywordCount * 5, 20) +
-                min(questionCount * 4, 8) +
-                min(numberCount * 3, 9) +
-                min(emotionalCount * 2, 4) +
-                densityScore
-            ).coerceIn(35, 95)
+                    min(keywordCount * 5, 20) +
+                    min(questionCount * 4, 8) +
+                    min(numberCount * 3, 9) +
+                    min(emotionalCount * 2, 4) +
+                    densityScore
+                ).coerceIn(35, 95)
 
             ScoredSegment(segment.startMs, segment.endMs, score, text, index)
         }
+    }
 
-        val ranked = scored.sortedByDescending { it.score }
-        val candidates = mutableListOf<AiClipCandidate>()
+    private fun buildTopicBlocks(scored: List<ScoredSegment>): List<TopicBlock> {
+        if (scored.isEmpty()) return emptyList()
 
-        // IMPORTANT: A Short is one coherent story, not a montage of
-        // unrelated high-scoring sentences. For every hook we therefore keep
-        // one contiguous transcript interval and choose its END from the
-        // content itself.
-        for (anchor in ranked.take(10)) {
-            val startIndex = chooseNarrativeStart(scored, anchor.index)
-            val endIndex = chooseNarrativeEnd(scored, startIndex)
+        val blocks = mutableListOf<MutableList<ScoredSegment>>()
+        var current = mutableListOf(scored.first())
 
-            if (endIndex <= startIndex) continue
-
-            val narrative = scored.subList(startIndex, endIndex + 1)
-            val startMs = narrative.first().startMs
-            val endMs = narrative.last().endMs
-            val duration = endMs - startMs
-
-            // Duration is adaptive; topic completion is the primary rule.
-            if (duration !in 15_000L..180_000L) continue
-
-            val combinedText = narrative.joinToString(" ") { it.text }
-                .replace(Regex("\\s+"), " ")
-                .trim()
-
-            val wordCount = combinedText.split(Regex("\\s+")).count { it.isNotBlank() }
-            if (wordCount < 35) continue
-
-            val hasEnding = hasConclusionSignal(narrative.last().text)
-            val naturalEnding = isNaturalEnding(narrative.last().text)
-            val next = scored.getOrNull(endIndex + 1)
-            val topicEnded = next != null && topicShift(narrative, next)
-            val boundaryQuality = boundaryQuality(narrative, next)
-
-            val completenessBonus = when {
-                hasEnding -> 22
-                topicEnded && boundaryQuality >= 2 -> 16
-                naturalEnding -> 10
-                boundaryQuality >= 2 -> 8
-                duration >= 75_000L -> 5
-                else -> 0
+        for (next in scored.drop(1)) {
+            if (topicShift(current, next) || next.startMs - current.last().endMs > 3_500L) {
+                blocks += current
+                current = mutableListOf(next)
+            } else {
+                current += next
             }
+        }
+        blocks += current
 
-            val averageScore = narrative.map { it.score }.average()
-            val score = (averageScore + completenessBonus)
-                .toInt()
-                .coerceIn(45, 99)
-
-            val hook = anchor.text.take(130)
-
-            candidates += AiClipCandidate(
-                startMs = startMs,
-                endMs = endMs,
-                score = score,
-                hook = hook,
-                reason = when {
-                    hasEnding -> "Konu, anlatım ve sonuç bölümü korunarak doğal bir kapanışta tamamlandı."
-                    topicEnded && boundaryQuality >= 2 -> "Konu, yeni konuya geçişten önce tamamlandı ve doğal konuşma sınırında kesildi."
-                    naturalEnding -> "Konu, cümle ve konuşma sınırında tamamlandı."
-                    else -> "Konu kesilmeden tek parça anlatım olarak seçildi."
-                },
-                suggestedTitle = buildTitle(hook),
-                segments = listOf(ClipSegment(startMs, endMs))
+        return blocks.mapIndexed { index, items ->
+            val text = items.joinToString(" ") { it.text }
+            val average = items.map { it.score }.average()
+            val maxScore = items.maxOf { it.score }
+            TopicBlock(
+                index = index,
+                segments = items,
+                score = (
+                    average * 0.45 +
+                    maxScore * 0.55 +
+                    if (hasConclusionSignal(text)) 25 else 0 +
+                    if (isNaturalEnding(items.last().text)) 5 else 0
+                ).toInt(),
+                durationMs = items.last().endMs - items.first().startMs
             )
         }
+    }
 
-        val selectedCandidates = candidates
-            .distinctBy { it.startMs.toString() + "-" + it.endMs.toString() }
-            .sortedByDescending { it.score }
-            .fold(mutableListOf<AiClipCandidate>()) { acc, candidate ->
-                if (acc.none { candidateSegmentsOverlap(it, candidate) }) acc += candidate
-                if (acc.size < 3) acc else acc
+    private fun buildSummaryCandidates(
+        scored: List<ScoredSegment>,
+        blocks: List<TopicBlock>
+    ): List<AiClipCandidate> {
+        val totalDuration = scored.last().endMs - scored.first().startMs
+        val seedLists = listOf(
+            blocks.indices.toList(),
+            blocks.sortedByDescending { it.score }.take(3).map { it.index },
+            listOf(
+                blocks.firstOrNull()?.index,
+                blocks.maxByOrNull { it.score }?.index,
+                blocks.lastOrNull()?.index
+            ).filterNotNull().distinct()
+        )
+
+        return seedLists.mapNotNull { seed ->
+            val chosen = selectSummaryBlocks(blocks, seed, totalDuration)
+            if (chosen.isEmpty()) return@mapNotNull null
+
+            val clipSegments = mergeNearby(
+                chosen.flatMap { it.segments }.map { ClipSegment(it.startMs, it.endMs) }
+            )
+            val duration = clipSegments.sumOf { it.endMs - it.startMs }
+            if (duration < 20_000L) return@mapNotNull null
+
+            val hasConclusion = chosen.any {
+                hasConclusionSignal(it.segments.joinToString(" ") { s -> s.text })
             }
+            val hasOpening = chosen.any { it.index == blocks.firstOrNull()?.index }
+            val continuity = chosen.zipWithNext().count { (a, b) -> b.index == a.index + 1 }
+            val coverage = if (totalDuration > 0) {
+                (chosen.last().segments.last().endMs -
+                    chosen.first().segments.first().startMs).toDouble() / totalDuration
+            } else 0.0
 
-        // If the transcript is too sparse for a confident semantic boundary,
-        // use the strongest contiguous region only when it has a real ending.
-        // Never manufacture a clip merely to satisfy a duration target.
-        if (selectedCandidates.isEmpty() && scored.isNotEmpty()) {
-            val startIndex = chooseNarrativeStart(scored, ranked.first().index)
-            val endIndex = chooseNarrativeEnd(scored, startIndex)
-            if (endIndex > startIndex) {
-                val startMs = scored[startIndex].startMs
-                val endMs = scored[endIndex].endMs
-                if (endMs - startMs in 15_000L..180_000L &&
-                    (hasConclusionSignal(scored[endIndex].text) ||
-                        isNaturalEnding(scored[endIndex].text))) {
-                    selectedCandidates += AiClipCandidate(
-                        startMs = startMs,
-                        endMs = endMs,
-                        score = ranked.take(5).map { it.score }.average().toInt().coerceIn(45, 85),
-                        hook = ranked.first().text.take(130),
-                        reason = "Konu kesilmeden kesintisiz bir bölüm olarak tamamlandı.",
-                        suggestedTitle = buildTitle(ranked.first().text),
-                        segments = listOf(ClipSegment(startMs, endMs))
-                    )
+            val score = (
+                chosen.map { it.score }.average() +
+                    if (hasOpening) 8 else 0 +
+                    if (hasConclusion) 18 else 0 +
+                    continuity * 4 +
+                    min(coverage * 20.0, 12.0)
+                ).toInt().coerceIn(45, 99)
+
+            val hook = chosen.first().segments.first().text.take(130)
+
+            AiClipCandidate(
+                startMs = clipSegments.first().startMs,
+                endMs = clipSegments.last().endMs,
+                score = score,
+                hook = hook,
+                reason = if (hasConclusion) {
+                    "Videonun farklı bölümlerindeki önemli bilgiler birleştirildi ve sonuç korunarak konu tamamlandı."
+                } else {
+                    "Giriş, ana bilgi ve ilgili bölümler birleştirilerek konu bütünlüğü korunmaya çalışıldı."
+                },
+                suggestedTitle = buildTitle(hook),
+                segments = clipSegments
+            )
+        }.distinctBy {
+            it.segments.joinToString("|") { s -> s.startMs.toString() + "-" + s.endMs.toString() }
+        }
+    }
+
+    private fun selectSummaryBlocks(
+        blocks: List<TopicBlock>,
+        seed: List<Int>,
+        totalDuration: Long
+    ): List<TopicBlock> {
+        val selected = linkedMapOf<Int, TopicBlock>()
+        fun add(block: TopicBlock) { selected[block.index] = block }
+
+        seed.mapNotNull { blocks.getOrNull(it) }.forEach { add(it) }
+        blocks.firstOrNull()?.let { add(it) }
+        blocks.maxByOrNull { it.score }?.let { add(it) }
+
+        val conclusion = blocks.lastOrNull {
+            hasConclusionSignal(it.segments.joinToString(" ") { s -> s.text }) ||
+                isNaturalEnding(it.segments.last().text)
+        }
+        conclusion?.let { add(it) }
+
+        val budget = if (totalDuration <= 120_000L) totalDuration else 120_000L
+        var duration = selected.values.sumOf { it.durationMs }
+
+        blocks.filter { it.index !in selected }
+            .sortedByDescending { it.score }
+            .forEach { block ->
+                if (duration >= budget) return@forEach
+                if (duration + block.durationMs <= budget) {
+                    add(block)
+                    duration += block.durationMs
                 }
             }
-        }
 
-        // Son çare: altyazı mevcut ama semantik sınır tespit edilemedi.
-        // Boş sonuç döndürmek yerine, tek parça ve mümkün olduğunca tamamlanmış
-        // bir anlatı aralığı üret. Transcript 180 saniyeden kısaysa tamamını
-        // korumak, konuyu yarıda kesmekten daha güvenlidir.
-        if (selectedCandidates.isEmpty()) {
-            val fallback = buildSafeFallback(scored, ranked.firstOrNull())
-            if (fallback != null) {
-                selectedCandidates += fallback
-            }
-        }
+        if (conclusion != null && conclusion.index !in selected) add(conclusion)
 
-        return ClipAnalysisResult(transcript, selectedCandidates)
+        return selected.values.sortedBy { it.index }
     }
+
+    private data class TopicBlock(
+        val index: Int,
+        val segments: List<ScoredSegment>,
+        val score: Int,
+        val durationMs: Long
+    )
 
     private fun buildSafeFallback(
         scored: List<ScoredSegment>,
