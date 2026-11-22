@@ -5,6 +5,7 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.net.Uri
+import java.io.BufferedInputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -108,22 +109,48 @@ object AudioChunkDecoder {
     }
 
     private fun resample16k(raw: File, output: File, sourceRate: Int, sourceSamples: Long) {
-        val bytes = raw.readBytes()
-        val count = bytes.size / 2
-        val input = ShortArray(count)
-        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(input)
+        if (sourceRate <= 0 || sourceSamples <= 0L) {
+            output.outputStream().use { }
+            raw.delete()
+            return
+        }
 
+        // Sesin tamamını RAM'e almak yerine bloklar halinde yeniden örnekle.
+        // Bu, raw.readBytes() + ShortArray kaynaklı büyük RAM sıçramasını önler.
         val ratio = sourceRate.toDouble() / 16000.0
-        val outputCount = floor(input.size / ratio).toInt()
-        output.outputStream().buffered(1024 * 1024).use { out ->
-            for (n in 0 until outputCount) {
-                val pos = n * ratio
-                val i = pos.toInt().coerceIn(0, input.size - 2)
-                val frac = pos - i
-                val value = (input[i] + (input[i + 1] - input[i]) * frac).toInt()
-                out.write(value and 0xff)
-                out.write((value shr 8) and 0xff)
+        val totalOutput = floor(sourceSamples / ratio).toLong().coerceAtLeast(1L)
+        val blockSize = 65_536
+        val inputBuffer = ShortArray(blockSize)
+        var sourceBase = 0L
+        var nextOutput = 0L
+
+        BufferedInputStream(raw.inputStream(), 64 * 1024).use { input ->
+            output.outputStream().buffered(64 * 1024).use { out ->
+                while (sourceBase < sourceSamples && nextOutput < totalOutput) {
+                    var count = 0
+                    while (count < blockSize) {
+                        val lo = input.read()
+                        if (lo < 0) break
+                        val hi = input.read()
+                        if (hi < 0) break
+                        inputBuffer[count++] = ((hi shl 8) or lo).toShort()
+                    }
+                    if (count == 0) break
+
+                    val blockEnd = sourceBase + count
+                    while (nextOutput < totalOutput) {
+                        val sourceIndex = (nextOutput * ratio).toLong()
+                        if (sourceIndex >= blockEnd) break
+                        val localIndex = (sourceIndex - sourceBase).toInt().coerceIn(0, count - 1)
+                        val sample = inputBuffer[localIndex].toInt()
+                        out.write(sample and 0xff)
+                        out.write((sample shr 8) and 0xff)
+                        nextOutput++
+                    }
+                    sourceBase = blockEnd
+                }
             }
         }
+        raw.delete()
     }
 }
