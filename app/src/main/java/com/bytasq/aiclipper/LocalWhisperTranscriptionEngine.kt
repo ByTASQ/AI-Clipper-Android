@@ -10,6 +10,8 @@ import com.k2fsa.sherpa.onnx.OfflineRecognizerResult
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.nio.ByteBuffer
@@ -27,34 +29,42 @@ class LocalWhisperTranscriptionEngine(
 
         val segments = mutableListOf<TranscriptSegment>()
         var startMs = 0L
-        val totalChunks = ((durationMs + 29_999L) / 30_000L).toInt()
+        val chunkDurationMs = 60_000L
+        val totalChunks = ((durationMs + chunkDurationMs - 1L) / chunkDurationMs).toInt()
         var currentChunk = 0
         onProgress(0, totalChunks)
 
-        while (startMs < durationMs) {
-            val endMs = minOf(startMs + 30_000L, durationMs)
-            val pcm = File(context.cacheDir, "asr_${System.currentTimeMillis()}.pcm")
-            try {
-                AudioChunkDecoder.decodeToMono16k(context, videoUri, startMs, endMs, pcm)
-                val samples = readPcm(pcm)
-                if (samples.isNotEmpty()) {
-                    val result = recognize(modelDir, samples)
-                    if (result.text.isNotBlank()) {
-                        segments += buildTimestampedSegments(result, startMs, endMs)
+        val recognizer = createRecognizer(modelDir)
+        try {
+            while (startMs < durationMs) {
+                currentCoroutineContext().ensureActive()
+                val endMs = minOf(startMs + chunkDurationMs, durationMs)
+                val pcm = File(context.cacheDir, "asr_${System.currentTimeMillis()}.pcm")
+                try {
+                    AudioChunkDecoder.decodeToMono16k(context, videoUri, startMs, endMs, pcm)
+                    currentCoroutineContext().ensureActive()
+                    val samples = readPcm(pcm)
+                    if (samples.isNotEmpty()) {
+                        val result = recognize(recognizer, samples)
+                        if (result.text.isNotBlank()) {
+                            segments += buildTimestampedSegments(result, startMs, endMs)
+                        }
                     }
+                } finally {
+                    pcm.delete()
                 }
-            } finally {
-                pcm.delete()
+                startMs = endMs
+                currentChunk++
+                onProgress(currentChunk, totalChunks)
             }
-            startMs = endMs
-            currentChunk++
-            onProgress(currentChunk, totalChunks)
+        } finally {
+            recognizer.release()
         }
 
         Transcript(mergeAdjacentSegments(segments))
     }
 
-    private fun recognize(modelDir: File, samples: FloatArray): OfflineRecognizerResult {
+    private fun createRecognizer(modelDir: File): OfflineRecognizer {
         val config = OfflineRecognizerConfig(
             featConfig = FeatureConfig(),
             modelConfig = OfflineModelConfig(
@@ -67,22 +77,24 @@ class LocalWhisperTranscriptionEngine(
                 ),
                 tokens = File(modelDir, "tiny-tokens.txt").absolutePath,
                 modelType = "whisper",
-                numThreads = maxOf(1, Runtime.getRuntime().availableProcessors() / 2),
+                numThreads = minOf(2, maxOf(1, Runtime.getRuntime().availableProcessors() / 2)),
                 provider = "cpu"
             )
         )
-        val recognizer = OfflineRecognizer(config = config)
+        return OfflineRecognizer(config = config)
+    }
+
+    private fun recognize(
+        recognizer: OfflineRecognizer,
+        samples: FloatArray
+    ): OfflineRecognizerResult {
+        val stream = recognizer.createStream()
         return try {
-            val stream = recognizer.createStream()
-            try {
-                stream.acceptWaveform(samples, 16000)
-                recognizer.decode(stream)
-                recognizer.getResult(stream)
-            } finally {
-                stream.release()
-            }
+            stream.acceptWaveform(samples, 16000)
+            recognizer.decode(stream)
+            recognizer.getResult(stream)
         } finally {
-            recognizer.release()
+            stream.release()
         }
     }
 
