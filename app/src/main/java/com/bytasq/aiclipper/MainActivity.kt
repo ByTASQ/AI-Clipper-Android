@@ -879,96 +879,20 @@ private suspend fun exportClip(
     endMs: Long,
     transcript: Transcript?,
     segments: List<Pair<Long, Long>> = listOf(startMs to endMs)
-): File = suspendCancellableCoroutine { continuation ->
+): File {
     val normalizedSegments = segments
         .map { (start, end) -> start.coerceAtLeast(0L) to end.coerceAtLeast(0L) }
         .filter { it.second > it.first }
 
     if (normalizedSegments.isEmpty()) {
-        continuation.resumeWithException(IllegalArgumentException("Geçerli klip bölümü bulunamadı."))
-        return@suspendCancellableCoroutine
+        throw IllegalArgumentException("Geçerli klip bölümü bulunamadı.")
     }
 
-    val outputDir = context.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: context.filesDir
-    if (!outputDir.exists() && !outputDir.mkdirs()) {
-        continuation.resumeWithException(IllegalStateException("Çıkış klasörü oluşturulamadı."))
-        return@suspendCancellableCoroutine
-    }
-
-    val outputFile = File(
-        outputDir,
-        "AIClipper_" + System.currentTimeMillis() + "_" + normalizedSegments.first().first + ".mp4"
+    return ShortVideoRenderer.render(
+        context = context,
+        uri = uri,
+        segments = normalizedSegments
     )
-
-    val editedItems = normalizedSegments.map { (clipStartMs, clipEndMs) ->
-        val clipping = MediaItem.ClippingConfiguration.Builder()
-            .setStartPositionMs(clipStartMs)
-            .setEndPositionMs(clipEndMs)
-            .build()
-
-        val mediaItem = MediaItem.Builder()
-            .setUri(uri)
-            .setClippingConfiguration(clipping)
-            .build()
-
-        // Short çıktısı 9:16 doldurur. Siyah bant bırakmak yerine kadrajı
-        // dikey formata dolduracak şekilde ölçekler; kaynak videonun ortasındaki
-        // ana görüntü korunur.
-        val videoEffects = mutableListOf<Effect>(
-            Presentation.createForAspectRatio(
-                9f / 16f,
-                Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP
-            )
-        )
-
-        // Kaynak videodaki veya hatalı otomatik transkriptteki yazıları tekrar
-        // videonun üzerine bindirmiyoruz. Böylece Çince/bozuk otomatik altyazı
-        // görüntünün üzerine eklenmez.
-        EditedMediaItem.Builder(mediaItem)
-            .setEffects(Effects(emptyList(), videoEffects))
-            .build()
-    }
-
-    // Birden fazla kaynak bölümünü ardışık olarak tek MP4 halinde birleştir.
-    val sequence = EditedMediaItemSequence(editedItems)
-    val composition = Composition.Builder(sequence).build()
-
-    val transformer = Transformer.Builder(context)
-        .setVideoMimeType(MimeTypes.VIDEO_H264)
-        .setAudioMimeType(MimeTypes.AUDIO_AAC)
-        .addListener(object : Transformer.Listener {
-            override fun onCompleted(
-                composition: Composition,
-                exportResult: ExportResult
-            ) {
-                android.media.MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(outputFile.absolutePath),
-                    arrayOf("video/mp4"),
-                    null
-                )
-                if (continuation.isActive) continuation.resume(outputFile)
-            }
-
-            override fun onError(
-                composition: Composition,
-                exportResult: ExportResult,
-                exportException: ExportException
-            ) {
-                outputFile.delete()
-                if (continuation.isActive) {
-                    continuation.resumeWithException(exportException)
-                }
-            }
-        })
-        .build()
-
-    continuation.invokeOnCancellation {
-        transformer.cancel()
-        outputFile.delete()
-    }
-
-    transformer.start(composition, outputFile.absolutePath)
 }
 
 @OptIn(UnstableApi::class)
