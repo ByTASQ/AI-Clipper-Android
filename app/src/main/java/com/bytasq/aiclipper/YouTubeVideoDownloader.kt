@@ -210,13 +210,15 @@ class YouTubeVideoDownloader(private val context: Context) {
         if (value.isBlank()) return null
 
         return try {
-            val uri = Uri.parse(
-                if (value.startsWith("http://") || value.startsWith("https://")) {
-                    value
-                } else {
-                    "https://$value"
-                }
-            )
+            // Yapıştırılan paylaşım bağlantıları bazen "//youtu.be/..." şeklinde
+            // protokol olmadan gelebilir. Bu durumda doğrudan https eklenmelidir.
+            val normalizedValue = when {
+                value.startsWith("//") -> "https:$value"
+                value.startsWith("http://") || value.startsWith("https://") -> value
+                else -> "https://$value"
+            }
+
+            val uri = Uri.parse(normalizedValue)
 
             val host = uri.host?.lowercase() ?: return null
             val videoId = when {
