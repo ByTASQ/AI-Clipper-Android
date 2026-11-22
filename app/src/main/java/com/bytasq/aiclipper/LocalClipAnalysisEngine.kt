@@ -178,7 +178,9 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         val maxEnd = if (totalDuration <= 180_000L) {
             scored.lastIndex
         } else {
-            val limit = scored[startIndex].startMs + 120_000L
+            // 120 saniyeyi hedefleme. 180 s yalnızca güvenlik/format tavanıdır.
+            // Gerçek bitiş, aşağıdaki boundaryQuality ile seçilir.
+            val limit = scored[startIndex].startMs + 180_000L
             scored.indexOfLast { it.endMs <= limit }.coerceAtLeast(startIndex)
         }
 
@@ -192,8 +194,20 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                     scored.subList(startIndex, endIndex + 1),
                     scored.getOrNull(endIndex + 1)
                 )
-                val score = boundary * 20 + if (isNaturalEnding(scored[endIndex].text)) 10 else 0
-                if (score > bestScore) {
+                val natural = isNaturalEnding(scored[endIndex].text)
+                val conclusion = hasConclusionSignal(scored[endIndex].text)
+                val score =
+                    boundary * 20 +
+                    if (natural) 10 else 0 +
+                    if (conclusion) 40 else 0
+
+                // Güçlü bir kapanış bulunduysa daha sonraki 2 dakikalık
+                // sınıra doğru ilerleme. İlk gerçek kapanış tercih edilir.
+                if (conclusion || (natural && boundary >= 2)) {
+                    bestEnd = endIndex
+                    bestScore = score
+                    if (conclusion) break
+                } else if (score > bestScore) {
                     bestScore = score
                     bestEnd = endIndex
                 }
