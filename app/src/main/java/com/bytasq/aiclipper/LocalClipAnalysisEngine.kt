@@ -74,13 +74,17 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             if (wordCount < 35) continue
 
             val hasEnding = hasConclusionSignal(narrative.last().text)
+            val naturalEnding = isNaturalEnding(narrative.last().text)
             val next = scored.getOrNull(endIndex + 1)
             val topicEnded = next != null && topicShift(narrative, next)
+            val boundaryQuality = boundaryQuality(narrative, next)
 
             val completenessBonus = when {
-                hasEnding -> 18
-                topicEnded -> 12
-                duration >= 75_000L -> 7
+                hasEnding -> 22
+                topicEnded && boundaryQuality >= 2 -> 16
+                naturalEnding -> 10
+                boundaryQuality >= 2 -> 8
+                duration >= 75_000L -> 5
                 else -> 0
             }
 
@@ -98,8 +102,9 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 hook = hook,
                 reason = when {
                     hasEnding -> "Konu, anlatım ve sonuç bölümü korunarak doğal bir kapanışta tamamlandı."
-                    topicEnded -> "Konu, yeni konuya geçiş başlamadan hemen önce doğal bir konuşma sınırında tamamlandı."
-                    else -> "Konu kesilmeden tek parça anlatım olarak seçildi ve doğal konuşma sınırında sonlandırıldı."
+                    topicEnded && boundaryQuality >= 2 -> "Konu, yeni konuya geçişten önce tamamlandı ve doğal konuşma sınırında kesildi."
+                    naturalEnding -> "Konu, cümle ve konuşma sınırında tamamlandı."
+                    else -> "Konu kesilmeden tek parça anlatım olarak seçildi."
                 },
                 suggestedTitle = buildTitle(hook),
                 segments = listOf(ClipSegment(startMs, endMs))
@@ -177,14 +182,16 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 val naturalPause = isNaturalEnding(current.text)
                 val transition = next != null &&
                     topicShift(scored.subList(startIndex, index + 1), next)
+                val quality = boundaryQuality(scored.subList(startIndex, index + 1), next)
 
-                var boundaryScore = 0
+                var boundaryScore = quality * 15
                 if (conclusion) boundaryScore += 100
                 if (transition) boundaryScore += 60
                 if (naturalPause) boundaryScore += 20
 
-                // Prefer a semantic conclusion over an early topic transition.
-                if (duration >= 30_000L && (conclusion || transition)) {
+                // Do not require punctuation: YouTube auto-captions often omit it.
+                // A strong semantic/topic boundary is sufficient.
+                if (duration >= 30_000L && (conclusion || transition || quality >= 2)) {
                     if (boundaryScore > bestBoundaryScore) {
                         bestBoundaryScore = boundaryScore
                         bestEnd = index
@@ -212,6 +219,36 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             normalized.endsWith("。") ||
             normalized.endsWith("！") ||
             normalized.endsWith("？")
+    }
+
+    private fun boundaryQuality(
+        current: List<ScoredSegment>,
+        next: ScoredSegment?
+    ): Int {
+        if (current.isEmpty()) return 0
+
+        var quality = 0
+        val lastText = current.last().text.trim()
+
+        if (hasConclusionSignal(lastText)) quality += 3
+        if (isNaturalEnding(lastText)) quality += 1
+
+        if (next != null) {
+            if (topicShift(current, next)) quality += 1
+
+            val gap = next.startMs - current.last().endMs
+            if (gap >= 700L) quality += 1
+
+            val nextLower = next.text.lowercase().trim()
+            if (listOf(
+                    "ama", "fakat", "çünkü", "yani", "bunun", "burada",
+                    "şimdi", "peki", "gelelim", "diğer", "son olarak"
+                ).any { nextLower.startsWith(it) }) {
+                quality += 1
+            }
+        }
+
+        return quality
     }
 
     private fun topicShift(
