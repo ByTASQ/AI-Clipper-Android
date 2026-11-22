@@ -82,18 +82,45 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
             if (third != null) selected += third
 
-            val merged = mergeNearby(
-                selected.sortedBy { it.startMs }.map { ClipSegment(it.startMs, it.endMs) }
+            // Preserve the complete narrative between the first and last
+            // selected transcript segments. Previously only the high-scoring
+            // sentences were rendered, which could remove the explanation or
+            // conclusion between them.
+            val firstIndex = selected.minOf { it.index }
+            var lastIndex = selected.maxOf { it.index }
+
+            // Do not stop immediately after a hook. Extend through adjacent
+            // transcript segments until the topic has had enough time to finish.
+            while (
+                lastIndex + 1 < scored.size &&
+                scored[lastIndex].endMs - scored[firstIndex].startMs < 45_000L
+            ) {
+                lastIndex++
+            }
+
+            while (
+                lastIndex + 1 < scored.size &&
+                scored[lastIndex].endMs - scored[firstIndex].startMs < 60_000L
+            ) {
+                if (hasConclusionSignal(scored[lastIndex].text)) break
+                lastIndex++
+            }
+
+            val narrative = scored.subList(firstIndex, lastIndex + 1)
+            val merged = listOf(
+                ClipSegment(
+                    narrative.first().startMs,
+                    narrative.last().endMs
+                )
             )
             val totalDuration = merged.sumOf { it.endMs - it.startMs }
 
             if (totalDuration !in 30_000L..120_000L) continue
 
-            val combinedText = merged.joinToString(" ") { range ->
-                segments
-                    .filter { it.endMs > range.startMs && it.startMs < range.endMs }
-                    .joinToString(" ") { it.text }
-            }.replace(Regex("\\s+"), " ").trim()
+            val combinedText = narrative
+                .joinToString(" ") { it.text }
+                .replace(Regex("\\s+"), " ")
+                .trim()
 
             if (combinedText.split(Regex("\\s+")).size < 35) continue
 
@@ -195,6 +222,15 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         }
 
         return ClipAnalysisResult(transcript, selectedCandidates)
+    }
+
+    private fun hasConclusionSignal(text: String): Boolean {
+        val normalized = text.lowercase().replace(Regex("\\s+"), " ")
+        return listOf(
+            "sonuç olarak", "kısacası", "özetle", "özetlemek gerekirse",
+            "demek ki", "bu yüzden", "dolayısıyla", "unutmayın",
+            "aklınızda olsun", "işin özü", "sonunda"
+        ).any { normalized.contains(it) }
     }
 
     private fun mergeNearby(input: List<ClipSegment>): List<ClipSegment> {
