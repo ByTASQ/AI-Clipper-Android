@@ -21,9 +21,16 @@ val downloadSherpaOnnxAar = tasks.register("downloadSherpaOnnxAar") {
 
 val stageLibcxxShared = tasks.register("stageLibcxxShared") {
     val abis = listOf("x86", "x86_64", "armeabi-v7a", "arm64-v8a")
+    val sdkRoot = System.getenv("ANDROID_SDK_ROOT")
+        ?: System.getenv("ANDROID_HOME")
+        ?: throw GradleException("ANDROID_SDK_ROOT/ANDROID_HOME bulunamadı.")
     val ndkHome = System.getenv("ANDROID_NDK_HOME")
         ?: System.getenv("ANDROID_NDK_ROOT")
-        ?: "${System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME")}/ndk/27.2.12479018"
+        ?: file("$sdkRoot/ndk").listFiles()
+            ?.filter { it.isDirectory }
+            ?.maxByOrNull { it.name }
+            ?.absolutePath
+        ?: throw GradleException("Android NDK bulunamadı.")
 
     doLast {
         val hostTag = if (System.getProperty("os.name").lowercase().contains("windows")) {
