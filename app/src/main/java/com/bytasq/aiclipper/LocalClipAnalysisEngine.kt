@@ -144,7 +144,88 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             }
         }
 
+        // Son çare: altyazı mevcut ama semantik sınır tespit edilemedi.
+        // Boş sonuç döndürmek yerine, tek parça ve mümkün olduğunca tamamlanmış
+        // bir anlatı aralığı üret. Transcript 180 saniyeden kısaysa tamamını
+        // korumak, konuyu yarıda kesmekten daha güvenlidir.
+        if (selectedCandidates.isEmpty()) {
+            val fallback = buildSafeFallback(scored, ranked.firstOrNull())
+            if (fallback != null) {
+                selectedCandidates += fallback
+            }
+        }
+
         return ClipAnalysisResult(transcript, selectedCandidates)
+    }
+
+    private fun buildSafeFallback(
+        scored: List<ScoredSegment>,
+        anchor: ScoredSegment?
+    ): AiClipCandidate? {
+        if (scored.isEmpty() || anchor == null) return null
+
+        val totalStart = scored.first().startMs
+        val totalEnd = scored.last().endMs
+        val totalDuration = totalEnd - totalStart
+
+        val startIndex = if (totalDuration <= 180_000L) {
+            0
+        } else {
+            chooseNarrativeStart(scored, anchor.index)
+        }
+
+        var endIndex = startIndex
+        val maxEnd = if (totalDuration <= 180_000L) {
+            scored.lastIndex
+        } else {
+            val limit = scored[startIndex].startMs + 120_000L
+            scored.indexOfLast { it.endMs <= limit }.coerceAtLeast(startIndex)
+        }
+
+        var bestEnd = -1
+        var bestScore = Int.MIN_VALUE
+
+        while (endIndex <= maxEnd) {
+            val duration = scored[endIndex].endMs - scored[startIndex].startMs
+            if (duration >= 15_000L) {
+                val boundary = boundaryQuality(
+                    scored.subList(startIndex, endIndex + 1),
+                    scored.getOrNull(endIndex + 1)
+                )
+                val score = boundary * 20 + if (isNaturalEnding(scored[endIndex].text)) 10 else 0
+                if (score > bestScore) {
+                    bestScore = score
+                    bestEnd = endIndex
+                }
+            }
+            endIndex++
+        }
+
+        if (bestEnd < startIndex) return null
+
+        val narrative = scored.subList(startIndex, bestEnd + 1)
+        val startMs = narrative.first().startMs
+        val endMs = narrative.last().endMs
+        val duration = endMs - startMs
+        if (duration !in 15_000L..180_000L) return null
+
+        val text = narrative.joinToString(" ") { it.text }
+        val words = text.split(Regex("\s+")).count { it.isNotBlank() }
+        if (words < 20) return null
+
+        return AiClipCandidate(
+            startMs = startMs,
+            endMs = endMs,
+            score = anchor.score.coerceIn(45, 75),
+            hook = anchor.text.take(130),
+            reason = if (totalDuration <= 180_000L) {
+                "Altyazıdaki anlatım kısa olduğu için konu bütünlüğü korunarak tamamı seçildi."
+            } else {
+                "Konuya en güçlü bölüm seçildi; mümkün olan en doğal konuşma sınırında tamamlandı."
+            },
+            suggestedTitle = buildTitle(anchor.text),
+            segments = listOf(ClipSegment(startMs, endMs))
+        )
     }
 
     private fun chooseNarrativeStart(
