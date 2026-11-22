@@ -189,9 +189,12 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 if (transition) boundaryScore += 60
                 if (naturalPause) boundaryScore += 20
 
-                // Do not require punctuation: YouTube auto-captions often omit it.
-                // A strong semantic/topic boundary is sufficient.
-                if (duration >= 30_000L && (conclusion || transition || quality >= 2)) {
+                // Do not require a 30-second minimum before accepting a real
+                // sentence/topic boundary. Auto captions may contain short segments.
+                // Punctuation is a weak signal, so it is accepted only as a fallback
+                // when no stronger semantic boundary is available.
+                if (duration >= 15_000L &&
+                    (conclusion || transition || quality >= 2 || naturalPause)) {
                     if (boundaryScore > bestBoundaryScore) {
                         bestBoundaryScore = boundaryScore
                         bestEnd = index
