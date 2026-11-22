@@ -63,7 +63,8 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             val endMs = narrative.last().endMs
             val duration = endMs - startMs
 
-            if (duration !in 30_000L..120_000L) continue
+            // Duration is adaptive; topic completion is the primary rule.
+            if (duration !in 15_000L..180_000L) continue
 
             val combinedText = narrative.joinToString(" ") { it.text }
                 .replace(Regex("\\s+"), " ")
@@ -114,15 +115,17 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             }
 
         // If the transcript is too sparse for a confident semantic boundary,
-        // use the strongest contiguous 30–120 second region rather than
-        // stitching unrelated pieces together.
+        // use the strongest contiguous region only when it has a real ending.
+        // Never manufacture a clip merely to satisfy a duration target.
         if (selectedCandidates.isEmpty() && scored.isNotEmpty()) {
             val startIndex = chooseNarrativeStart(scored, ranked.first().index)
             val endIndex = chooseNarrativeEnd(scored, startIndex)
             if (endIndex > startIndex) {
                 val startMs = scored[startIndex].startMs
                 val endMs = scored[endIndex].endMs
-                if (endMs - startMs in 30_000L..120_000L) {
+                if (endMs - startMs in 15_000L..180_000L &&
+                    (hasConclusionSignal(scored[endIndex].text) ||
+                        isNaturalEnding(scored[endIndex].text))) {
                     selectedCandidates += AiClipCandidate(
                         startMs = startMs,
                         endMs = endMs,
@@ -161,41 +164,44 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         startIndex: Int
     ): Int {
         var bestEnd = -1
+        var bestBoundaryScore = Int.MIN_VALUE
         var index = startIndex
 
         while (index < scored.size) {
             val duration = scored[index].endMs - scored[startIndex].startMs
 
-            if (duration >= 30_000L) {
+            if (duration >= 15_000L) {
                 val current = scored[index]
                 val next = scored.getOrNull(index + 1)
-
                 val conclusion = hasConclusionSignal(current.text)
                 val naturalPause = isNaturalEnding(current.text)
-                val transition = next != null && topicShift(scored.subList(startIndex, index + 1), next)
+                val transition = next != null &&
+                    topicShift(scored.subList(startIndex, index + 1), next)
 
-                // Prefer a true conclusion. Otherwise stop at the sentence
-                // immediately before a clear topic transition. Never stop
-                // before 30 s and never extend beyond 120 s.
-                if (conclusion) return index
-                if (naturalPause && transition) return index
-                if (transition && duration >= 45_000L) return index
+                var boundaryScore = 0
+                if (conclusion) boundaryScore += 100
+                if (transition) boundaryScore += 60
+                if (naturalPause) boundaryScore += 20
 
-                // Keep searching for the actual ending instead of assuming
-                // that 45/60 seconds means the story is over.
-                bestEnd = index
+                // Prefer a semantic conclusion over an early topic transition.
+                if (duration >= 30_000L && (conclusion || transition)) {
+                    if (boundaryScore > bestBoundaryScore) {
+                        bestBoundaryScore = boundaryScore
+                        bestEnd = index
+                    }
+
+                    // A clear conclusion is the preferred terminal boundary.
+                    if (conclusion) return index
+                }
             }
 
-            if (duration >= 120_000L) break
+            // 180 s is only a format ceiling. If no genuine ending exists
+            // before it, reject this candidate instead of cutting mid-topic.
+            if (duration >= 180_000L) break
             index++
         }
 
-        return if (bestEnd >= 0) bestEnd else {
-            val target = scored.indexOfLast {
-                it.endMs - scored[startIndex].startMs <= 120_000L
-            }
-            target
-        }
+        return bestEnd
     }
 
     private fun isNaturalEnding(text: String): Boolean {
