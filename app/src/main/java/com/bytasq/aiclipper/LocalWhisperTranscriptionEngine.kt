@@ -22,14 +22,14 @@ class LocalWhisperTranscriptionEngine(
     private val context: Context,
     private val onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }
 ) : TranscriptionEngine {
-    override suspend fun transcribe(videoUri: Uri): Transcript = withContext(Dispatchers.Default) {
+    override suspend fun transcribe(videoUri: Uri): Transcript = withContext(Dispatchers.IO) {
         val modelDir = WhisperModelManager(context).ensureModel()
         val durationMs = videoDuration(videoUri)
         if (durationMs <= 0L) throw IllegalStateException("Video süresi okunamadı.")
 
         val segments = mutableListOf<TranscriptSegment>()
         var startMs = 0L
-        val chunkDurationMs = 60_000L
+        val chunkDurationMs = 30_000L
         val totalChunks = ((durationMs + chunkDurationMs - 1L) / chunkDurationMs).toInt()
         var currentChunk = 0
         onProgress(0, totalChunks)
@@ -77,7 +77,7 @@ class LocalWhisperTranscriptionEngine(
                 ),
                 tokens = File(modelDir, "tiny-tokens.txt").absolutePath,
                 modelType = "whisper",
-                numThreads = minOf(2, maxOf(1, Runtime.getRuntime().availableProcessors() / 2)),
+                numThreads = 1,
                 provider = "cpu"
             )
         )
