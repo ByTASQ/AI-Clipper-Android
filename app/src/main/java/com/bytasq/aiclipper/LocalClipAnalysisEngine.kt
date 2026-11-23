@@ -256,28 +256,37 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         val selectedTopicIds = linkedSetOf<Int>()
         selectedTopicIds += first.topicIndex
 
-        // Önce ana konuların en güçlü temsilcisini seç.
-        // Her konu yalnızca gerçekten yeni bilgi getiriyorsa eklenir.
+        // Her ana konu için sadece "en iyi 30 saniyeyi" almak yerine,
+        // seçilen temsilcinin komşu parçalarını da kontrol ediyoruz. Böylece
+        // bir konunun tanımı bir parçada, sonucu diğer parçada kaldığında
+        // özet ortasından kesilmiyor.
         for (topicId in meaningfulTopics) {
             if (topicId == first.topicIndex) continue
-            val best = topicUnits[topicId]
-                ?.maxByOrNull { it.score }
-                ?: continue
 
-            if (isRedundant(best, selected.values)) continue
-            if (add(best)) selectedTopicIds += topicId
+            val topicGroup = topicUnits[topicId].orEmpty()
+            val best = topicGroup.maxByOrNull { it.score } ?: continue
+            val completeUnits = expandForTopicCompleteness(best, topicGroup)
+
+            for (unit in completeUnits) {
+                if (isRedundant(unit, selected.values)) continue
+                if (add(unit)) selectedTopicIds += topicId
+                if (duration >= 180_000L) break
+            }
+
+            if (duration >= 180_000L) break
         }
 
-        // Kapanış, konu bütünlüğünü tamamlıyorsa eklenir; sırf videonun sonu
-        // olduğu için eklenmez.
+        // Kapanış, seçilen ana fikirlerin gerçekten sonucunu veriyorsa eklenir.
+        // Sadece videonun sonlarında bulunduğu için otomatik olarak alınmaz.
         if (preferConclusion && conclusion != null && conclusion !== first) {
-            if (!isRedundant(conclusion, selected.values)) {
+            if (!isRedundant(conclusion, selected.values) &&
+                conclusion.topicIndex in meaningfulTopics) {
                 add(conclusion)
             }
         }
 
-        // Hâlâ eksik bir anlatı varsa, yüksek puanlı ünitelerden yalnızca
-        // yeni bilgi taşıyanları ekle. 180 s burada sadece güvenlik tavanıdır.
+        // Konu kapsamı hâlâ eksikse, yeni bilgi taşıyan parçaları ekle.
+        // Burada süre doldurulmuyor: yeni bilgi yoksa seçim duruyor.
         val ranked = units
             .filter { it.id !in selected }
             .sortedWith(
@@ -290,12 +299,23 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             if (duration >= 180_000L) break
             if (isRedundant(unit, selected.values)) continue
 
-            if (preferDiverseTopics) {
-                val existingTopics = selected.values.map { it.topicIndex }.toSet()
-                if (unit.topicIndex in existingTopics && existingTopics.size < 3) continue
+            val existingTopics = selected.values.map { it.topicIndex }.toSet()
+            if (unit.topicIndex in existingTopics) {
+                val topicGroup = topicUnits[unit.topicIndex].orEmpty()
+                val bestTopicScore = topicGroup.maxOfOrNull { it.score } ?: 0
+                if (unit.score < bestTopicScore * 0.72) continue
             }
 
-            if (add(unit)) break
+            if (preferDiverseTopics && unit.topicIndex in existingTopics && existingTopics.size < 3) {
+                continue
+            }
+
+            if (add(unit)) {
+                // Yeterli yeni bilgi kalmadığında aşağıdaki adaylar gereksiz
+                // uzatma yaratmasın.
+                val covered = topicCoverageScore(selected.values, units)
+                if (covered >= 8 && selected.values.size >= 2) break
+            }
         }
 
         // For a very short source/summary, keep the selected material rather
@@ -344,6 +364,46 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             suggestedTitle = buildTitle(hook),
             segments = clipSegments
         )
+    }
+
+    private fun expandForTopicCompleteness(
+        best: SummaryUnit,
+        topicGroup: List<SummaryUnit>
+    ): List<SummaryUnit> {
+        if (topicGroup.size <= 1) return listOf(best)
+
+        val bestIndex = topicGroup.indexOfFirst { it.id == best.id }
+        if (bestIndex < 0) return listOf(best)
+
+        val result = mutableListOf<SummaryUnit>()
+        result += best
+
+        fun shouldInclude(unit: SummaryUnit): Boolean {
+            val relativeScore = unit.score.toDouble() / best.score.coerceAtLeast(1).toDouble()
+            val text = unit.segments.joinToString(" ") { it.text }
+
+            return relativeScore >= 0.72 ||
+                hasConclusionSignal(text) ||
+                isNaturalEnding(unit.segments.last().text)
+        }
+
+        // Önce best parçanın hemen sonrasını al. Anlatıların çoğunda
+        // açıklama -> örnek -> sonuç sıralaması bulunduğundan, sonuç parçası
+        // kopmasın.
+        var i = bestIndex + 1
+        while (i < topicGroup.size && shouldInclude(topicGroup[i])) {
+            result += topicGroup[i]
+            i++
+        }
+
+        // Başlangıçta tanım/kurulum best parçadan önce kaldıysa onu da al.
+        i = bestIndex - 1
+        while (i >= 0 && shouldInclude(topicGroup[i])) {
+            result.add(0, topicGroup[i])
+            i--
+        }
+
+        return result.distinctBy { it.id }.sortedBy { it.segments.first().startMs }
     }
 
     private fun isRedundant(
