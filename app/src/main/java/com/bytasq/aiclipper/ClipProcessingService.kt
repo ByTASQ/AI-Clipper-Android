@@ -88,7 +88,12 @@ class ClipProcessingService : Service() {
         }
 
         updateState("PROCESSING", 0.52f, "Video yerel olarak özetleniyor...")
-        val result = LocalClipAnalysisEngine().analyze(transcript)
+        val result = LocalClipAnalysisEngine { percent, status ->
+            // Analiz artık tek bir %52 -> %65 sıçraması değil; segment puanlama
+            // ve özet seçimi gerçek ilerlemeyle raporlanıyor.
+            val progress = 0.52f + (percent / 100f) * 0.13f
+            updateState("PROCESSING", progress, status)
+        }.analyze(transcript)
         val candidate = result.candidates.firstOrNull()
             ?: throw IllegalStateException("Önemli video bölümü bulunamadı.")
 
