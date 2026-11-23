@@ -197,8 +197,8 @@ class LocalClipAnalysisEngine(
 
                 if (
                     current.isNotEmpty() &&
-                    currentDuration >= 22_000L &&
-                    currentDuration + segmentDuration > 32_000L
+                    currentDuration >= 14_000L &&
+                    currentDuration + segmentDuration > 26_000L
                 ) {
                     units += makeSummaryUnit(nextId++, block.index, current)
                     current = mutableListOf()
@@ -208,7 +208,7 @@ class LocalClipAnalysisEngine(
                 current += segment
                 currentDuration += segmentDuration
 
-                if (currentDuration >= 30_000L) {
+                if (currentDuration >= 24_000L) {
                     units += makeSummaryUnit(nextId++, block.index, current)
                     current = mutableListOf()
                     currentDuration = 0L
@@ -404,7 +404,7 @@ class LocalClipAnalysisEngine(
         best: SummaryUnit,
         topicGroup: List<SummaryUnit>
     ): List<SummaryUnit> {
-        if (topicGroup.size <= 1) return listOf(best)
+        if (topicGroup.isEmpty()) return emptyList()
 
         val bestIndex = topicGroup.indexOfFirst { it.id == best.id }
         if (bestIndex < 0) return listOf(best)
@@ -412,29 +412,68 @@ class LocalClipAnalysisEngine(
         val result = mutableListOf<SummaryUnit>()
         result += best
 
-        fun shouldInclude(unit: SummaryUnit): Boolean {
-            val relativeScore = unit.score.toDouble() / best.score.coerceAtLeast(1).toDouble()
-            val text = unit.segments.joinToString(" ") { it.text }
+        fun textOf(unit: SummaryUnit): String =
+            unit.segments.joinToString(" ") { it.text }
 
-            return relativeScore >= 0.72 ||
+        fun similarity(a: SummaryUnit, b: SummaryUnit): Double {
+            val aWords = tokenize(textOf(a)).toSet()
+            val bWords = tokenize(textOf(b)).toSet()
+            if (aWords.isEmpty() || bWords.isEmpty()) return 0.0
+            val intersection = aWords.intersect(bWords).size
+            val union = aWords.union(bWords).size
+            return if (union == 0) 0.0 else intersection.toDouble() / union
+        }
+
+        fun shouldIncludeContext(unit: SummaryUnit, reference: SummaryUnit): Boolean {
+            val relativeScore =
+                unit.score.toDouble() / reference.score.coerceAtLeast(1).toDouble()
+            val overlap = similarity(unit, reference)
+            val text = textOf(unit)
+
+            return relativeScore >= 0.62 ||
+                overlap >= 0.14 ||
                 hasConclusionSignal(text) ||
                 isNaturalEnding(unit.segments.last().text)
         }
 
-        // Önce best parçanın hemen sonrasını al. Anlatıların çoğunda
-        // açıklama -> örnek -> sonuç sıralaması bulunduğundan, sonuç parçası
-        // kopmasın.
-        var i = bestIndex + 1
-        while (i < topicGroup.size && shouldInclude(topicGroup[i])) {
-            result += topicGroup[i]
-            i++
+        // Konunun açıklama -> örnek -> sonuç zincirini koru; fakat bütün
+        // konuyu körlemesine alma. Her iki yönde en fazla iki komşu ünite.
+        var i = bestIndex - 1
+        var reference = best
+        var steps = 0
+        while (i >= 0 && steps < 2) {
+            val unit = topicGroup[i]
+            if (!shouldIncludeContext(unit, reference)) break
+            result.add(0, unit)
+            reference = unit
+            i--
+            steps++
         }
 
-        // Başlangıçta tanım/kurulum best parçadan önce kaldıysa onu da al.
-        i = bestIndex - 1
-        while (i >= 0 && shouldInclude(topicGroup[i])) {
-            result.add(0, topicGroup[i])
-            i--
+        i = bestIndex + 1
+        reference = best
+        steps = 0
+        while (i < topicGroup.size && steps < 2) {
+            val unit = topicGroup[i]
+            if (!shouldIncludeContext(unit, reference)) break
+            result += unit
+            reference = unit
+            i++
+            steps++
+        }
+
+        // Güçlü sonuç hemen sonradaysa, skor düşük olsa bile konuyu yarım bırakma.
+        val last = result.lastOrNull()
+        if (last != null) {
+            val lastIndex = topicGroup.indexOfFirst { it.id == last.id }
+            val nextIndex = lastIndex + 1
+            if (nextIndex in topicGroup.indices) {
+                val next = topicGroup[nextIndex]
+                val nextText = textOf(next)
+                if (hasConclusionSignal(nextText) && next.id !in result.map { it.id }) {
+                    result += next
+                }
+            }
         }
 
         return result.distinctBy { it.id }.sortedBy { it.segments.first().startMs }
