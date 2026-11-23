@@ -219,7 +219,14 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
     ): AiClipCandidate? {
         if (units.isEmpty()) return null
 
-        val first = units.first()
+        // İlk 30 saniyeyi otomatik olarak seçmek yerine, videonun giriş
+        // kısmındaki en güçlü anlamlı üniteyi hook olarak kullan.
+        // Böylece "merhaba, bugün..." gibi boş girişler özete taşınmaz.
+        val first = units
+            .take(minOf(4, units.size))
+            .maxByOrNull { it.score }
+            ?: units.first()
+
         val conclusion = units.lastOrNull {
             hasConclusionSignal(it.segments.joinToString(" ") { s -> s.text }) ||
                 isNaturalEnding(it.segments.last().text)
@@ -678,14 +685,19 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
         val transitionWords = listOf(
             "şimdi", "peki", "gelelim", "diğer", "başka", "bir sonraki",
-            "öte yandan", "ayrıca", "son olarak", "şimdi ise"
+            "öte yandan", "ayrıca", "son olarak", "şimdi ise",
+            "buradan", "devamında", "bir diğer konu"
         )
 
         val startsNewTopic = transitionWords.any {
             next.text.trim().lowercase().startsWith(it)
         }
 
-        return similarity < 0.08 || startsNewTopic
+        // Tek bir kısa cümlede ortak kelime bulunmaması yeni konu anlamına
+        // gelmez. Önceki sürümde similarity < 0.08 bu nedenle aynı konuyu
+        // gereksiz biçimde parçalara ayırabiliyordu.
+        // Çok güçlü bir geçiş yoksa yeni konu kararı ancak belirgin kopuşta verilir.
+        return startsNewTopic || similarity < 0.025
     }
 
     private fun tokenize(text: String): List<String> {
@@ -713,7 +725,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
         for (segment in input.sortedBy { it.startMs }) {
             val previous = out.lastOrNull()
-            if (previous != null && segment.startMs - previous.endMs <= 2_500L) {
+            if (previous != null && segment.startMs - previous.endMs <= 1_500L) {
                 out[out.lastIndex] = ClipSegment(
                     previous.startMs,
                     maxOf(previous.endMs, segment.endMs)
