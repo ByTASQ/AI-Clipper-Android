@@ -9,27 +9,45 @@ import kotlin.math.min
  * - Başlangıç/bitişleri transkript segmentlerinden seçer.
  * - Süreyi içerik yoğunluğu, hook gücü ve doğal konuşma sınırına göre belirler.
  */
-class LocalClipAnalysisEngine : ClipAnalysisEngine {
+class LocalClipAnalysisEngine(
+    private val onProgress: (Int, String) -> Unit = { _, _ -> }
+) : ClipAnalysisEngine {
     override suspend fun analyze(transcript: Transcript): ClipAnalysisResult {
         val segments = transcript.segments
             .filter { it.text.isNotBlank() && it.endMs > it.startMs }
 
         if (segments.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
 
+        onProgress(0, "Transkript temizleniyor...")
         val globalTermFrequency = buildGlobalTermFrequency(segments)
-        val scored = scoreSegments(segments, globalTermFrequency)
+
+        onProgress(15, "Video bölümleri puanlanıyor...")
+        val scored = scoreSegments(segments, globalTermFrequency) { percent ->
+            onProgress(15 + (percent * 0.25f).toInt(), "Video bölümleri analiz ediliyor... %$percent")
+        }
+
+        onProgress(42, "Konular belirleniyor...")
         val blocks = buildTopicBlocks(scored)
         if (blocks.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
 
-        val candidates = buildSummaryCandidates(scored, blocks)
+        onProgress(58, "Özet adayları hazırlanıyor...")
+        val candidates = buildSummaryCandidates(scored, blocks) { percent ->
+            onProgress(58 + (percent * 0.37f).toInt(), "Önemli bölümler seçiliyor... %$percent")
+        }
+
+        onProgress(98, "Özet tamamlanıyor...")
         return ClipAnalysisResult(transcript, candidates.sortedByDescending { it.score }.take(3))
     }
 
     private fun scoreSegments(
         segments: List<TranscriptSegment>,
-        globalTermFrequency: Map<String, Int>
+        globalTermFrequency: Map<String, Int>,
+        progress: (Int) -> Unit = {}
     ): List<ScoredSegment> {
         return segments.mapIndexed { index, segment ->
+            if (index % 20 == 0 || index == segments.lastIndex) {
+                progress(((index + 1) * 100 / segments.size.coerceAtLeast(1)).coerceIn(0, 100))
+            }
             val text = segment.text.replace(Regex("\\s+"), " ").trim()
             val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
             val keywordCount = KEYWORDS.count { text.contains(it, ignoreCase = true) }
@@ -141,18 +159,27 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
     private fun buildSummaryCandidates(
         scored: List<ScoredSegment>,
-        blocks: List<TopicBlock>
+        blocks: List<TopicBlock>,
+        progress: (Int) -> Unit = {}
     ): List<AiClipCandidate> {
         if (blocks.isEmpty()) return emptyList()
 
         val units = splitIntoSummaryUnits(blocks)
         if (units.isEmpty()) return emptyList()
 
-        return listOf(
-            buildSummaryCandidate(units, preferConclusion = true),
-            buildSummaryCandidate(units, preferConclusion = false),
-            buildSummaryCandidate(units, preferConclusion = true, preferDiverseTopics = true)
-        ).filterNotNull().distinctBy {
+        val candidates = mutableListOf<AiClipCandidate>()
+        val variants = listOf(
+            { buildSummaryCandidate(units, preferConclusion = true) },
+            { buildSummaryCandidate(units, preferConclusion = false) },
+            { buildSummaryCandidate(units, preferConclusion = true, preferDiverseTopics = true) }
+        )
+
+        variants.forEachIndexed { index, builder ->
+            progress(((index + 1) * 100) / variants.size)
+            builder()?.let { candidates += it }
+        }
+
+        return candidates.distinctBy {
             it.segments.joinToString("|") { s -> "${s.startMs}-${s.endMs}" }
         }
     }
