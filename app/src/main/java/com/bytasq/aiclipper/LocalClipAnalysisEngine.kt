@@ -350,11 +350,19 @@ class LocalClipAnalysisEngine(
                 // tekrar eden üniteler düşük marjinal bilgi taşıyabilir.
                 val covered = topicCoverageScore(selected.values, units)
                 val marginalGain = marginalInformationGain(unit, selected.values)
+                val flow = detectInformationFlowState(
+                    selected.values.joinToString(" ") {
+                        it.segments.joinToString(" ") { s -> s.text }
+                    }
+                )
 
                 if (
                     selected.values.size >= 2 &&
                     covered >= 8 &&
-                    marginalGain < 0.22
+                    marginalGain < 0.22 &&
+                    !flow.needsCause &&
+                    !flow.needsSolution &&
+                    !flow.needsResult
                 ) {
                     break
                 }
@@ -467,6 +475,34 @@ class LocalClipAnalysisEngine(
                     similarity(unit, reference) >= 0.08
         }
 
+        fun informationState(units: Collection<SummaryUnit>): InformationFlowState {
+            val text = units.joinToString(" ") { textOf(it) }
+            return detectInformationFlowState(text)
+        }
+
+        fun shouldContinueForInformationFlow(
+            selectedUnits: Collection<SummaryUnit>,
+            next: SummaryUnit
+        ): Boolean {
+            val state = informationState(selectedUnits)
+            val nextState = informationState(selectedUnits + next)
+
+            // Konu bir problem/neden/çözüm zinciri başlattıysa, zincirin
+            // eksik halkasını tamamlamadan yalnızca "yüksek skor" nedeniyle
+            // kesme. Bu, "sorun -> neden -> çözüm -> sonuç" akışını korur.
+            if (state.needsSolution && nextState.hasSolution) return true
+            if (state.needsCause && nextState.hasCause) return true
+            if (state.needsResult && nextState.hasResult) return true
+            if (state.hasSolution && !state.hasResult && nextState.hasResult) return true
+            if (state.hasCause && !state.hasSolution && nextState.hasSolution) return true
+
+            // Bilgi akışı zaten tamamlandıysa, sonraki parça yalnızca aynı
+            // konuyu tekrar ediyorsa eklenmesin.
+            if (state.isComplete && nextState.informationGain < 0.18) return false
+
+            return nextState.informationGain >= 0.18
+        }
+
         val selected = linkedMapOf<Int, SummaryUnit>()
         selected[best.id] = best
 
@@ -497,15 +533,17 @@ class LocalClipAnalysisEngine(
         while (i < topicGroup.size && forwardSteps < 5) {
             val next = topicGroup[i]
             val text = textOf(next)
-            val include = shouldIncludeContext(next, reference)
+            val includeContext = shouldIncludeContext(next, reference)
+            val includeForInformationFlow = shouldContinueForInformationFlow(selected.values, next)
 
-            if (!include && !hasConclusionSignal(text)) break
+            if (!includeContext && !includeForInformationFlow && !hasConclusionSignal(text)) break
 
             selected[next.id] = next
             reference = next
             forwardSteps++
 
-            if (hasConclusionSignal(text)) {
+            val flow = informationState(selected.values)
+            if (hasConclusionSignal(text) || (flow.isComplete && flow.informationGain >= 0.18)) {
                 completionFound = true
                 break
             }
@@ -545,6 +583,82 @@ class LocalClipAnalysisEngine(
         return selected.values
             .distinctBy { it.id }
             .sortedBy { it.segments.first().startMs }
+    }
+
+    private data class InformationFlowState(
+        val hasProblem: Boolean,
+        val hasCause: Boolean,
+        val hasSolution: Boolean,
+        val hasResult: Boolean,
+        val hasExample: Boolean,
+        val informationGain: Double
+    ) {
+        val needsCause: Boolean
+            get() = hasProblem && !hasCause
+
+        val needsSolution: Boolean
+            get() = (hasProblem || hasCause) && !hasSolution
+
+        val needsResult: Boolean
+            get() = hasSolution && !hasResult
+
+        val isComplete: Boolean
+            get() = hasSolution && (hasResult || hasExample) ||
+                hasResult ||
+                (!hasProblem && !hasCause && informationGain < 0.18)
+    }
+
+    private fun detectInformationFlowState(text: String): InformationFlowState {
+        val normalized = text.lowercase().replace(Regex("\\s+"), " ").trim()
+        if (normalized.isBlank()) {
+            return InformationFlowState(false, false, false, false, false, 0.0)
+        }
+
+        val problemSignals = listOf(
+            "sorun", "problem", "hata", "şikayet", "neden", "niçin",
+            "sıkıntı", "risk", "tehlike", "olmadı", "çalışmıyor"
+        )
+        val causeSignals = listOf(
+            "çünkü", "sebebi", "sebep", "nedeni", "nedeniyle", "kaynaklan",
+            "bundan dolayı", "şundan dolayı", "asıl nedeni", "nasıl oluyor"
+        )
+        val solutionSignals = listOf(
+            "çözüm", "çözümü", "yapmanız", "yapmak", "uygulayın", "uygulamak",
+            "kullanmak", "kullanın", "değiştirin", "değiştirmek", "ayar",
+            "yöntem", "şöyle yap", "şunu yap", "kontrol edin", "kontrol etmek",
+            "öneri", "tavsiye"
+        )
+        val resultSignals = listOf(
+            "sonuç", "sonuçta", "dolayısıyla", "demek ki", "işe yaradı",
+            "işe yarıyor", "düzeldi", "çözüldü", "başardık", "tamamlandı",
+            "artık", "böylece", "kısacası", "özetle"
+        )
+        val exampleSignals = listOf(
+            "örneğin", "mesela", "örnek olarak", "test ettik", "denedik",
+            "deneme", "uyguladık", "yüzde", "%", "saniye", "dakika"
+        )
+
+        fun containsAny(signals: List<String>): Boolean =
+            signals.any { normalized.contains(it) }
+
+        val problem = containsAny(problemSignals)
+        val cause = containsAny(causeSignals)
+        val solution = containsAny(solutionSignals)
+        val result = containsAny(resultSignals)
+        val example = containsAny(exampleSignals)
+
+        val tokens = tokenize(normalized).toSet()
+        val uniqueInformation = tokens.size.coerceAtMost(24)
+        val informationGain = (uniqueInformation / 24.0).coerceIn(0.0, 1.0)
+
+        return InformationFlowState(
+            hasProblem = problem,
+            hasCause = cause,
+            hasSolution = solution,
+            hasResult = result,
+            hasExample = example,
+            informationGain = informationGain
+        )
     }
 
     private fun isRedundant(
