@@ -418,74 +418,133 @@ class LocalClipAnalysisEngine(
         val bestIndex = topicGroup.indexOfFirst { it.id == best.id }
         if (bestIndex < 0) return listOf(best)
 
-        val result = mutableListOf<SummaryUnit>()
-        result += best
-
         fun textOf(unit: SummaryUnit): String =
             unit.segments.joinToString(" ") { it.text }
 
+        fun wordSet(unit: SummaryUnit): Set<String> =
+            tokenize(textOf(unit)).toSet()
+
         fun similarity(a: SummaryUnit, b: SummaryUnit): Double {
-            val aWords = tokenize(textOf(a)).toSet()
-            val bWords = tokenize(textOf(b)).toSet()
+            val aWords = wordSet(a)
+            val bWords = wordSet(b)
             if (aWords.isEmpty() || bWords.isEmpty()) return 0.0
+
             val intersection = aWords.intersect(bWords).size
             val union = aWords.union(bWords).size
             return if (union == 0) 0.0 else intersection.toDouble() / union
         }
 
-        fun shouldIncludeContext(unit: SummaryUnit, reference: SummaryUnit): Boolean {
+        fun contextualStrength(
+            unit: SummaryUnit,
+            reference: SummaryUnit
+        ): Double {
             val relativeScore =
                 unit.score.toDouble() / reference.score.coerceAtLeast(1).toDouble()
             val overlap = similarity(unit, reference)
+
+            // A topic's explanation can use different vocabulary from its
+            // headline sentence. Score, lexical overlap, and conclusion
+            // signals are therefore combined instead of using one threshold.
+            var strength = relativeScore * 0.45 + overlap * 0.55
+
+            val text = textOf(unit)
+            if (hasConclusionSignal(text)) strength += 0.22
+            if (isNaturalEnding(unit.segments.last().text)) strength += 0.05
+
+            return strength
+        }
+
+        fun shouldIncludeContext(
+            unit: SummaryUnit,
+            reference: SummaryUnit
+        ): Boolean {
+            val strength = contextualStrength(unit, reference)
             val text = textOf(unit)
 
-            return relativeScore >= 0.62 ||
-                overlap >= 0.14 ||
+            return strength >= 0.42 ||
                 hasConclusionSignal(text) ||
-                isNaturalEnding(unit.segments.last().text)
+                isNaturalEnding(unit.segments.last().text) &&
+                    similarity(unit, reference) >= 0.08
         }
 
-        // Konunun açıklama -> örnek -> sonuç zincirini koru; fakat bütün
-        // konuyu körlemesine alma. Her iki yönde en fazla iki komşu ünite.
-        var i = bestIndex - 1
+        val selected = linkedMapOf<Int, SummaryUnit>()
+        selected[best.id] = best
+
+        // Önce geriye doğru giderek "giriş/açıklama" zincirini bul.
+        // Sadece en fazla iki üniteye bağlı kalmak yerine, konu gerçekten
+        // devam ettiği sürece genişlemesine izin veriyoruz.
         var reference = best
-        var steps = 0
-        while (i >= 0 && steps < 2) {
-            val unit = topicGroup[i]
-            if (!shouldIncludeContext(unit, reference)) break
-            result.add(0, unit)
-            reference = unit
+        var i = bestIndex - 1
+        var backwardSteps = 0
+
+        while (i >= 0 && backwardSteps < 4) {
+            val previous = topicGroup[i]
+            if (!shouldIncludeContext(previous, reference)) break
+
+            selected[previous.id] = previous
+            reference = previous
             i--
-            steps++
+            backwardSteps++
         }
 
-        i = bestIndex + 1
+        // Sonra ileri doğru giderek "örnek -> sonuç -> kapanış" zincirini
+        // tamamla. Bir sonuç cümlesi bulunduğunda konu tamamlanmış kabul edilir.
         reference = best
-        steps = 0
-        while (i < topicGroup.size && steps < 2) {
-            val unit = topicGroup[i]
-            if (!shouldIncludeContext(unit, reference)) break
-            result += unit
-            reference = unit
+        i = bestIndex + 1
+        var forwardSteps = 0
+        var completionFound = false
+
+        while (i < topicGroup.size && forwardSteps < 5) {
+            val next = topicGroup[i]
+            val text = textOf(next)
+            val include = shouldIncludeContext(next, reference)
+
+            if (!include && !hasConclusionSignal(text)) break
+
+            selected[next.id] = next
+            reference = next
+            forwardSteps++
+
+            if (hasConclusionSignal(text)) {
+                completionFound = true
+                break
+            }
+
             i++
-            steps++
         }
 
-        // Güçlü sonuç hemen sonradaysa, skor düşük olsa bile konuyu yarım bırakma.
-        val last = result.lastOrNull()
-        if (last != null) {
-            val lastIndex = topicGroup.indexOfFirst { it.id == last.id }
-            val nextIndex = lastIndex + 1
-            if (nextIndex in topicGroup.indices) {
-                val next = topicGroup[nextIndex]
-                val nextText = textOf(next)
-                if (hasConclusionSignal(nextText) && next.id !in result.map { it.id }) {
-                    result += next
+        // En güçlü ünite sonlara yakınsa ve sonuç daha ilerideyse, aradaki
+        // zayıf ama aynı konuya ait üniteyi tek başına atlama. Konu zincirinin
+        // kronolojisini koru.
+        if (!completionFound) {
+            val lastSelectedIndex = topicGroup.indexOfFirst {
+                it.id == selected.keys.lastOrNull()
+            }
+
+            if (lastSelectedIndex >= 0) {
+                for (j in lastSelectedIndex + 1 until topicGroup.size) {
+                    val candidate = topicGroup[j]
+                    val text = textOf(candidate)
+
+                    if (hasConclusionSignal(text)) {
+                        selected[candidate.id] = candidate
+                        completionFound = true
+                        break
+                    }
+
+                    if (similarity(candidate, reference) >= 0.08) {
+                        selected[candidate.id] = candidate
+                        reference = candidate
+                    } else {
+                        break
+                    }
                 }
             }
         }
 
-        return result.distinctBy { it.id }.sortedBy { it.segments.first().startMs }
+        return selected.values
+            .distinctBy { it.id }
+            .sortedBy { it.segments.first().startMs }
     }
 
     private fun isRedundant(
