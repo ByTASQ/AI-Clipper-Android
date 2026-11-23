@@ -174,138 +174,76 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             }
         }
 
-    LaunchedEffect(autoProcessYoutube, selectedVideo, videoDurationMs) {
+    LaunchedEffect(autoProcessYoutube, selectedVideo, sharedYoutubeUrl) {
         if (!autoProcessYoutube || selectedVideo == null) return@LaunchedEffect
-        try {
-            analysisState = AnalysisState.Analyzing
-            analysisError = null
-            analysisProgress = 0f
-            analysisStatus = "Video hazırlanıyor..."
-            val generatedTranscript = if (sharedYoutubeUrl.isNotBlank()) {
-                try {
-                    analysisStatus = "YouTube transkripti alınıyor..."
-                    YouTubeTranscriptTranscriptionEngine(sharedYoutubeUrl) { current, total ->
-                        scope.launch {
-                            analysisProgress = current.toFloat() / total.toFloat()
-                            analysisStatus = if (current >= total) {
-                                "YouTube transkripti alındı."
-                            } else {
-                                "YouTube transkripti alınıyor..."
-                            }
-                        }
-                    }.transcribe(selectedVideo!!)
-                } catch (_: Exception) {
-                    analysisStatus = "YouTube transkripti alınamadı, ses analizi yapılıyor..."
-                    LocalWhisperTranscriptionEngine(context) { current, total ->
-                        scope.launch {
-                            analysisProgress = current.toFloat() / total.toFloat()
-                            analysisStatus = "Ses transkripti çıkarılıyor... %$current/$total"
-                        }
-                    }.transcribe(selectedVideo!!)
-                }
-            } else {
-                LocalWhisperTranscriptionEngine(context) { current, total ->
-                    scope.launch {
-                        analysisProgress = current.toFloat() / total.toFloat()
-                        analysisStatus = "Ses transkripti çıkarılıyor... %$current/$total"
-                    }
-                }.transcribe(selectedVideo!!)
-            }
-            transcript = generatedTranscript
-            transcriptText = generatedTranscript.fullText
-            analysisProgress = 0.95f
-            analysisStatus = "Konuşma analizi tamamlandı. Klip adayları hesaplanıyor..."
 
-            analysisStatus = "Video yerel olarak özetleniyor..."
-            val result = LocalClipAnalysisEngine().analyze(generatedTranscript)
-            val candidates = if (result.candidates.isNotEmpty()) {
-                result.candidates.map {
-                ClipCandidate(
-                    startSeconds = it.startMs / 1000f,
-                    endSeconds = it.endMs / 1000f,
-                    score = it.score,
-                    segments = it.segments.map { segment ->
-                        ClipSegmentUi(
-                            startSeconds = segment.startMs / 1000f,
-                            endSeconds = segment.endMs / 1000f
+        val youtubeUrl = sharedYoutubeUrl.trim()
+        autoProcessYoutube = false
+        analysisState = AnalysisState.Analyzing
+        analysisError = null
+        batchExportState = BatchExportState.Exporting(0, 1)
+
+        ClipProcessingService.start(
+            context = context,
+            videoUri = selectedVideo!!,
+            youtubeUrl = youtubeUrl
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        val prefs = context.getSharedPreferences(
+            ClipProcessingService.PREFS,
+            android.content.Context.MODE_PRIVATE
+        )
+
+        while (true) {
+            val state = prefs.getString("state", "IDLE").orEmpty()
+            val progress = prefs.getFloat("progress", 0f)
+            val status = prefs.getString("status", "").orEmpty()
+
+            analysisProgress = progress
+            if (status.isNotBlank()) analysisStatus = status
+
+            when (state) {
+                "PROCESSING" -> {
+                    analysisState = AnalysisState.Analyzing
+                    batchExportState = BatchExportState.Exporting(0, 1)
+                }
+
+                "COMPLETED" -> {
+                    val path = prefs.getString("filePath", "").orEmpty()
+                    if (path.isNotBlank() && File(path).isFile) {
+                        val clip = GeneratedClip(
+                            fileName = prefs.getString("fileName", File(path).name).orEmpty(),
+                            filePath = path,
+                            title = prefs.getString("title", "AI Short").orEmpty(),
+                            description = prefs.getString("description", "").orEmpty(),
+                            hashtags = prefs.getString("hashtags", "")
+                                .orEmpty()
+                                .split("|")
+                                .filter { it.isNotBlank() },
+                            score = prefs.getInt("score", 0)
                         )
-                    },
-                    hook = it.hook,
-                    reason = it.reason,
-                    suggestedTitle = it.suggestedTitle
-                )
+                        generatedClips = listOf(clip)
+                        previewVideo = Uri.fromFile(File(path))
+                        playPreview = true
+                        playSelection = false
+                        batchExportState = BatchExportState.Completed(1)
+                        analysisState = AnalysisState.Completed(emptyList())
+                        youtubeDownloadState = YouTubeDownloadState.Completed
+                    }
                 }
-            } else if (generatedTranscript.segments.isEmpty()) {
-                buildFallbackCandidates(context, selectedVideo!!)
-            } else {
-                emptyList()
-            }
-            analysisState = AnalysisState.Completed(candidates)
-            analysisProgress = 1f
-            analysisStatus = "Analiz tamamlandı: ${candidates.size} klip adayı bulundu."
 
-            if (candidates.isEmpty()) {
-                throw IllegalStateException("Önemli video bölümü bulunamadı.")
-            }
-
-            val candidate = candidates.first()
-            batchExportState = BatchExportState.Exporting(0, 1)
-
-            val file = exportClip(
-                context = context,
-                uri = selectedVideo!!,
-                startMs = candidate.startSeconds.toLong() * 1000L,
-                endMs = candidate.endSeconds.toLong() * 1000L,
-                transcript = generatedTranscript,
-                segments = candidate.segments.map {
-                    it.startSeconds.toLong() * 1000L to it.endSeconds.toLong() * 1000L
+                "FAILED" -> {
+                    val message = status.ifBlank { "Video hazırlanamadı." }
+                    analysisState = AnalysisState.Idle
+                    batchExportState = BatchExportState.Failed(message)
+                    youtubeDownloadState = YouTubeDownloadState.Failed(message)
+                    analysisError = message
                 }
-            )
-
-            val clipMetadata = try {
-                LocalClipMetadataEngine().generate(
-                    transcriptText = candidate.segments.joinToString(" ") { range ->
-                        generatedTranscript.segments
-                            .filter {
-                                it.endMs > (range.startSeconds * 1000L).toLong() &&
-                                        it.startMs < (range.endSeconds * 1000L).toLong()
-                            }
-                            .joinToString(" ") { it.text }
-                    },
-                    suggestedTitle = candidate.suggestedTitle,
-                    hook = candidate.hook,
-                    reason = candidate.reason
-                )
-            } catch (_: Exception) {
-                ClipMetadata(candidate.suggestedTitle, candidate.reason, emptyList())
             }
 
-            val created = listOf(
-                GeneratedClip(
-                    fileName = file.name,
-                    filePath = file.absolutePath,
-                    title = clipMetadata.title,
-                    description = clipMetadata.description,
-                    hashtags = clipMetadata.hashtags,
-                    score = candidate.score
-                )
-            )
-
-            generatedClips = created
-            previewVideo = Uri.fromFile(file)
-            clipRange = 0f..0f
-            playSelection = false
-            playPreview = true
-            batchExportState = BatchExportState.Completed(1)
-
-            youtubeDownloadState = YouTubeDownloadState.Completed
-            autoProcessYoutube = false
-        } catch (e: Exception) {
-            analysisState = AnalysisState.Idle
-            batchExportState = BatchExportState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
-            youtubeDownloadState = YouTubeDownloadState.Failed(e.message ?: "Otomatik YouTube işlemi başarısız.")
-            analysisError = null
-            autoProcessYoutube = false
+            delay(500)
         }
     }
 
