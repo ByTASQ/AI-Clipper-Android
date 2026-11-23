@@ -16,7 +16,8 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
         if (segments.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
 
-        val scored = scoreSegments(segments)
+        val globalTermFrequency = buildGlobalTermFrequency(segments)
+        val scored = scoreSegments(segments, globalTermFrequency)
         val blocks = buildTopicBlocks(scored)
         if (blocks.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
 
@@ -24,7 +25,10 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         return ClipAnalysisResult(transcript, candidates.sortedByDescending { it.score }.take(3))
     }
 
-    private fun scoreSegments(segments: List<TranscriptSegment>): List<ScoredSegment> {
+    private fun scoreSegments(
+        segments: List<TranscriptSegment>,
+        globalTermFrequency: Map<String, Int>
+    ): List<ScoredSegment> {
         return segments.mapIndexed { index, segment ->
             val text = segment.text.replace(Regex("\\s+"), " ").trim()
             val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }
@@ -43,17 +47,62 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
                 else -> 1
             }
 
+            val centrality = semanticCentrality(words, globalTermFrequency)
             val score = (
-                35 +
+                25 +
                     min(keywordCount * 5, 20) +
                     min(questionCount * 4, 8) +
                     min(numberCount * 3, 9) +
                     min(emotionalCount * 2, 4) +
-                    densityScore
-                ).coerceIn(35, 95)
+                    densityScore +
+                    centrality
+                ).coerceIn(25, 95)
 
             ScoredSegment(segment.startMs, segment.endMs, score, text, index)
         }
+    }
+
+    private fun buildGlobalTermFrequency(
+        segments: List<TranscriptSegment>
+    ): Map<String, Int> {
+        val frequency = mutableMapOf<String, Int>()
+        for (segment in segments) {
+            for (word in tokenize(segment.text).distinct()) {
+                frequency[word] = (frequency[word] ?: 0) + 1
+            }
+        }
+        return frequency
+    }
+
+    private fun semanticCentrality(
+        words: List<String>,
+        globalTermFrequency: Map<String, Int>
+    ): Int {
+        if (words.isEmpty() || globalTermFrequency.isEmpty()) return 0
+
+        val unique = words.map { normalizeToken(it) }
+            .filter { it.length >= 3 && it !in STOP_WORDS }
+            .distinct()
+
+        if (unique.isEmpty()) return 0
+
+        val weighted = unique.sumOf { word ->
+            val frequency = globalTermFrequency[word] ?: 0
+            when {
+                frequency >= 8 -> 3
+                frequency >= 4 -> 2
+                frequency >= 2 -> 1
+                else -> 0
+            }
+        }
+
+        return min(weighted, 12)
+    }
+
+    private fun normalizeToken(text: String): String {
+        return text.lowercase()
+            .replace(Regex("[^\\p{L}\\p{Nd}]"), "")
+            .trim()
     }
 
     private fun buildTopicBlocks(scored: List<ScoredSegment>): List<TopicBlock> {
@@ -104,7 +153,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             buildSummaryCandidate(units, preferConclusion = false),
             buildSummaryCandidate(units, preferConclusion = true, preferDiverseTopics = true)
         ).filterNotNull().distinctBy {
-            it.segments.joinToString("|") { s -> "undefined-undefined" }
+            it.segments.joinToString("|") { s -> "${s.startMs}-${s.endMs}" }
         }
     }
 
@@ -202,7 +251,11 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
         val ranked = units
             .filter { it.id !in selected }
-            .sortedByDescending { it.score }
+            .sortedWith(
+                compareByDescending<SummaryUnit> { it.score }
+                    .thenBy { it.topicIndex }
+                    .thenBy { it.segments.first().startMs }
+            )
 
         for (unit in ranked) {
             if (duration >= 180_000L) break
@@ -238,12 +291,14 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             b.topicIndex == a.topicIndex ||
                 b.topicIndex == a.topicIndex + 1
         }
+        val coverage = topicCoverageScore(selected.values, units)
 
         val score = (
             selected.values.map { it.score }.average() +
                 (if (hasFinalConclusion) 20 else 0) +
                 min(topicCount * 4, 16) +
-                min(coherence * 3, 12)
+                min(coherence * 3, 12) +
+                coverage
             ).toInt().coerceIn(45, 99)
 
         val hook = ordered.first().segments.first().text.take(130)
@@ -261,6 +316,28 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             suggestedTitle = buildTitle(hook),
             segments = clipSegments
         )
+    }
+
+    private fun topicCoverageScore(
+        selected: Collection<SummaryUnit>,
+        allUnits: List<SummaryUnit>
+    ): Int {
+        if (allUnits.isEmpty()) return 0
+
+        val selectedTopics = selected.map { it.topicIndex }.toSet()
+        val meaningfulTopics = allUnits
+            .groupBy { it.topicIndex }
+            .filterValues { topicUnits ->
+                topicUnits.maxOf { it.score } >= 45
+            }
+            .keys
+
+        if (meaningfulTopics.isEmpty()) return 0
+
+        val ratio = selectedTopics.intersect(meaningfulTopics).size.toDouble() /
+            meaningfulTopics.size.toDouble()
+
+        return (ratio * 8.0).toInt().coerceIn(0, 8)
     }
 
     private data class SummaryUnit(
