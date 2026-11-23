@@ -212,10 +212,14 @@ class YouTubeVideoDownloader(private val context: Context) {
         return try {
             // Yapıştırılan paylaşım bağlantıları bazen "//youtu.be/..." şeklinde
             // protokol olmadan gelebilir. Bu durumda doğrudan https eklenmelidir.
+            // Android TextField'a bazı paylaşım bağlantıları tek "/" ile gelebiliyor:
+            // "/youtu.be/..." veya "//youtu.be/...". Bunları normal URL'ye çevir.
+            val cleanedValue = value.trimStart('/')
+
             val normalizedValue = when {
-                value.startsWith("//") -> "https:$value"
-                value.startsWith("http://") || value.startsWith("https://") -> value
-                else -> "https://$value"
+                value.startsWith("http://", ignoreCase = true) ||
+                    value.startsWith("https://", ignoreCase = true) -> value
+                else -> "https://$cleanedValue"
             }
 
             val uri = Uri.parse(normalizedValue)
