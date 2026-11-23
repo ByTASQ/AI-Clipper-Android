@@ -94,107 +94,216 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
         scored: List<ScoredSegment>,
         blocks: List<TopicBlock>
     ): List<AiClipCandidate> {
-        val totalDuration = scored.last().endMs - scored.first().startMs
-        val seedLists = listOf(
-            blocks.indices.toList(),
-            blocks.sortedByDescending { it.score }.take(3).map { it.index },
-            listOf(
-                blocks.firstOrNull()?.index,
-                blocks.maxByOrNull { it.score }?.index,
-                blocks.lastOrNull()?.index
-            ).filterNotNull().distinct()
-        )
+        if (blocks.isEmpty()) return emptyList()
 
-        return seedLists.mapNotNull { seed ->
-            val chosen = selectSummaryBlocks(blocks, seed, totalDuration)
-            if (chosen.isEmpty()) return@mapNotNull null
+        /*
+         * A topic block can be very long (for example 13 minutes when the
+         * speaker stays on one subject). Never treat all blocks as mandatory.
+         * Split long blocks into summary units and select only enough units to
+         * make a coherent 60-120 second Short. 180 seconds is an exceptional
+         * ceiling, not the normal target.
+         */
+        val units = splitIntoSummaryUnits(blocks)
+        if (units.isEmpty()) return emptyList()
 
-            val clipSegments = mergeNearby(
-                chosen.flatMap { it.segments }.map { ClipSegment(it.startMs, it.endMs) }
-            )
-            val duration = clipSegments.sumOf { it.endMs - it.startMs }
-            if (duration < 20_000L) return@mapNotNull null
+        val candidates = listOf(
+            buildSummaryCandidate(units, preferConclusion = true),
+            buildSummaryCandidate(units, preferConclusion = false),
+            buildSummaryCandidate(units, preferConclusion = true, preferDiverseTopics = true)
+        ).filterNotNull()
 
-            val hasConclusion = chosen.any {
-                hasConclusionSignal(it.segments.joinToString(" ") { s -> s.text })
-            }
-            val hasOpening = chosen.any { it.index == blocks.firstOrNull()?.index }
-            val continuity = chosen.zipWithNext().count { (a, b) -> b.index == a.index + 1 }
-            val coverage = if (totalDuration > 0) {
-                (chosen.last().segments.last().endMs -
-                    chosen.first().segments.first().startMs).toDouble() / totalDuration
-            } else 0.0
-
-            val score = (
-                chosen.map { it.score }.average() +
-                    (if (hasOpening) 8 else 0) +
-                    (if (hasConclusion) 18 else 0) +
-                    continuity * 4 +
-                    min(coverage * 20.0, 12.0)
-                ).toInt().coerceIn(45, 99)
-
-            val hook = chosen.first().segments.first().text.take(130)
-
-            AiClipCandidate(
-                startMs = clipSegments.first().startMs,
-                endMs = clipSegments.last().endMs,
-                score = score,
-                hook = hook,
-                reason = if (hasConclusion) {
-                    "Videonun farklı bölümlerindeki önemli bilgiler birleştirildi ve sonuç korunarak konu tamamlandı."
-                } else {
-                    "Giriş, ana bilgi ve ilgili bölümler birleştirilerek konu bütünlüğü korunmaya çalışıldı."
-                },
-                suggestedTitle = buildTitle(hook),
-                segments = clipSegments
-            )
-        }.distinctBy {
-            it.segments.joinToString("|") { s -> s.startMs.toString() + "-" + s.endMs.toString() }
+        return candidates.distinctBy {
+            it.segments.joinToString("|") { s -> "undefined-undefined" }
         }
     }
 
-    private fun selectSummaryBlocks(
-        blocks: List<TopicBlock>,
-        seed: List<Int>,
-        totalDuration: Long
-    ): List<TopicBlock> {
-        val selected = linkedMapOf<Int, TopicBlock>()
-        fun add(block: TopicBlock) { selected[block.index] = block }
+    private fun splitIntoSummaryUnits(blocks: List<TopicBlock>): List<SummaryUnit> {
+        val units = mutableListOf<SummaryUnit>()
+        var nextId = 0
 
-        seed.mapNotNull { blocks.getOrNull(it) }.forEach { add(it) }
-        blocks.firstOrNull()?.let { add(it) }
-        blocks.maxByOrNull { it.score }?.let { add(it) }
+        for (block in blocks) {
+            var current = mutableListOf<ScoredSegment>()
+            var currentDuration = 0L
 
-        val conclusion = blocks.lastOrNull {
-            hasConclusionSignal(it.segments.joinToString(" ") { s -> s.text }) ||
-                isNaturalEnding(it.segments.last().text)
-        }
-        conclusion?.let { add(it) }
+            for (segment in block.segments) {
+                val segmentDuration = segment.endMs - segment.startMs
 
-        val budget = if (totalDuration <= 120_000L) totalDuration else 120_000L
-        var duration = selected.values.sumOf { it.durationMs }
+                // Keep a unit around 20-30 seconds. A segment itself is never
+                // cut because its timestamp is the smallest reliable boundary.
+                if (
+                    current.isNotEmpty() &&
+                    currentDuration >= 22_000L &&
+                    currentDuration + segmentDuration > 32_000L
+                ) {
+                    units += makeSummaryUnit(nextId++, block.index, current)
+                    current = mutableListOf()
+                    currentDuration = 0L
+                }
 
-        blocks.filter { it.index !in selected }
-            .sortedByDescending { it.score }
-            .forEach { block ->
-                if (duration >= budget) return@forEach
-                if (duration + block.durationMs <= budget) {
-                    add(block)
-                    duration += block.durationMs
+                current += segment
+                currentDuration += segmentDuration
+
+                if (currentDuration >= 30_000L) {
+                    units += makeSummaryUnit(nextId++, block.index, current)
+                    current = mutableListOf()
+                    currentDuration = 0L
                 }
             }
 
-        if (conclusion != null && conclusion.index !in selected) add(conclusion)
+            if (current.isNotEmpty()) {
+                units += makeSummaryUnit(nextId++, block.index, current)
+            }
+        }
 
-        return selected.values.sortedBy { it.index }
+        return units
     }
 
-    private data class TopicBlock(
-        val index: Int,
+    private fun makeSummaryUnit(
+        id: Int,
+        topicIndex: Int,
+        segments: List<ScoredSegment>
+    ): SummaryUnit {
+        val text = segments.joinToString(" ") { it.text }
+        return SummaryUnit(
+            id = id,
+            topicIndex = topicIndex,
+            segments = segments,
+            score = segments.map { it.score }.average().toInt() +
+                if (hasConclusionSignal(text)) 25 else 0 +
+                if (isNaturalEnding(segments.last().text)) 5 else 0
+        )
+    }
+
+    private fun buildSummaryCandidate(
+        units: List<SummaryUnit>,
+        preferConclusion: Boolean,
+        preferDiverseTopics: Boolean = false
+    ): AiClipCandidate? {
+        if (units.isEmpty()) return null
+
+        val first = units.first()
+        val conclusion = units.lastOrNull {
+            hasConclusionSignal(it.segments.joinToString(" ") { s -> s.text }) ||
+                isNaturalEnding(it.segments.last().text)
+        }
+
+        val selected = linkedMapOf<Int, SummaryUnit>()
+        var duration = 0L
+
+        fun add(unit: SummaryUnit): Boolean {
+            if (selected.containsKey(unit.id)) return false
+            val unitDuration = unit.durationMs
+            if (unitDuration <= 0L) return false
+
+            // Normal target: 60-120 seconds. Do not exceed 120 while filling
+            // unless the final conclusion is needed and still fits the 180s
+            // exceptional ceiling.
+            val normalCap = 120_000L
+            val hardCap = 180_000L
+            val remaining = hardCap - duration
+
+            if (unitDuration <= remaining &&
+                (duration + unitDuration <= normalCap || unit === conclusion)
+            ) {
+                selected[unit.id] = unit
+                duration += unitDuration
+                return true
+            }
+            return false
+        }
+
+        add(first)
+
+        if (preferConclusion && conclusion != null && conclusion !== first) {
+            add(conclusion)
+        }
+
+        val ranked = units
+            .filter { it.id !in selected }
+            .sortedByDescending { it.score }
+
+        for (unit in ranked) {
+            if (duration >= 120_000L) break
+
+            if (preferDiverseTopics) {
+                val existingTopics = selected.values.map { it.topicIndex }.toSet()
+                if (unit.topicIndex in existingTopics && existingTopics.size < 3) {
+                    continue
+                }
+            }
+
+            add(unit)
+        }
+
+        // If we have less than one minute, fill with the strongest remaining
+        // units. This prevents a valid but too-short "summary" from being
+        // returned for a normal-length source.
+        if (duration < 60_000L) {
+            for (unit in units.sortedByDescending { it.score }) {
+                if (duration >= 60_000L) break
+                add(unit)
+            }
+        }
+
+        if (duration < 60_000L) return null
+
+        // If the conclusion was not included and it fits the exceptional
+        // ceiling, add it. This is preferable to ending before the topic's
+        // conclusion.
+        if (conclusion != null && conclusion.id !in selected) {
+            add(conclusion)
+        }
+
+        val ordered = selected.values.sortedBy { it.segments.first().startMs }
+        val clipSegments = mergeNearby(
+            ordered.flatMap { it.segments }
+                .map { ClipSegment(it.startMs, it.endMs) }
+        )
+
+        val finalDuration = clipSegments.sumOf { it.endMs - it.startMs }
+        if (finalDuration !in 60_000L..180_000L) return null
+
+        val hasFinalConclusion = conclusion != null &&
+            selected.containsKey(conclusion.id)
+        val topicCount = selected.values.map { it.topicIndex }.distinct().size
+        val coherence = ordered.zipWithNext().count { (a, b) ->
+            b.topicIndex == a.topicIndex ||
+                b.topicIndex == a.topicIndex + 1
+        }
+
+        val score = (
+            selected.values.map { it.score }.average() +
+                if (hasFinalConclusion) 20 else 0 +
+                min(topicCount * 4, 16) +
+                min(coherence * 3, 12)
+            ).toInt().coerceIn(45, 99)
+
+        val hook = ordered.first().segments.first().text.take(130)
+
+        return AiClipCandidate(
+            startMs = clipSegments.first().startMs,
+            endMs = clipSegments.last().endMs,
+            score = score,
+            hook = hook,
+            reason = if (hasFinalConclusion) {
+                "Videonun önemli bölümleri 1-2 dakikalık Short içinde birleştirildi ve konu sonucu korunarak tamamlandı."
+            } else {
+                "Videonun ana fikirleri seçilerek 1-2 dakikalık Short haline getirildi."
+            },
+            suggestedTitle = buildTitle(hook),
+            segments = clipSegments
+        )
+    }
+
+    private data class SummaryUnit(
+        val id: Int,
+        val topicIndex: Int,
         val segments: List<ScoredSegment>,
-        val score: Int,
+        val score: Int
+    ) {
         val durationMs: Long
-    )
+            get() = segments.last().endMs - segments.first().startMs
+    }
 
     private fun buildSafeFallback(
         scored: List<ScoredSegment>,
