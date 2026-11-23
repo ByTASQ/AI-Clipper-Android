@@ -243,12 +243,41 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             return true
         }
 
+        // Özet, videonun başından rastgele bir bölüm + kapanış + yüksek puanlı
+        // parçalar şeklinde doldurulmaz. Önce anlatının ana omurgasını çıkarıyoruz.
         add(first)
 
-        if (preferConclusion && conclusion != null && conclusion !== first) {
-            add(conclusion)
+        val topicUnits = units.groupBy { it.topicIndex }
+        val meaningfulTopics = topicUnits
+            .filterValues { group -> group.maxOf { it.score } >= 45 }
+            .keys
+            .sorted()
+
+        val selectedTopicIds = linkedSetOf<Int>()
+        selectedTopicIds += first.topicIndex
+
+        // Önce ana konuların en güçlü temsilcisini seç.
+        // Her konu yalnızca gerçekten yeni bilgi getiriyorsa eklenir.
+        for (topicId in meaningfulTopics) {
+            if (topicId == first.topicIndex) continue
+            val best = topicUnits[topicId]
+                ?.maxByOrNull { it.score }
+                ?: continue
+
+            if (isRedundant(best, selected.values)) continue
+            if (add(best)) selectedTopicIds += topicId
         }
 
+        // Kapanış, konu bütünlüğünü tamamlıyorsa eklenir; sırf videonun sonu
+        // olduğu için eklenmez.
+        if (preferConclusion && conclusion != null && conclusion !== first) {
+            if (!isRedundant(conclusion, selected.values)) {
+                add(conclusion)
+            }
+        }
+
+        // Hâlâ eksik bir anlatı varsa, yüksek puanlı ünitelerden yalnızca
+        // yeni bilgi taşıyanları ekle. 180 s burada sadece güvenlik tavanıdır.
         val ranked = units
             .filter { it.id !in selected }
             .sortedWith(
@@ -259,15 +288,14 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
         for (unit in ranked) {
             if (duration >= 180_000L) break
+            if (isRedundant(unit, selected.values)) continue
 
             if (preferDiverseTopics) {
                 val existingTopics = selected.values.map { it.topicIndex }.toSet()
-                if (unit.topicIndex in existingTopics && existingTopics.size < 3) {
-                    continue
-                }
+                if (unit.topicIndex in existingTopics && existingTopics.size < 3) continue
             }
 
-            add(unit)
+            if (add(unit)) break
         }
 
         // For a very short source/summary, keep the selected material rather
@@ -316,6 +344,32 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             suggestedTitle = buildTitle(hook),
             segments = clipSegments
         )
+    }
+
+    private fun isRedundant(
+        candidate: SummaryUnit,
+        selected: Collection<SummaryUnit>
+    ): Boolean {
+        if (selected.isEmpty()) return false
+
+        val candidateWords = tokenize(
+            candidate.segments.joinToString(" ") { it.text }
+        ).toSet()
+        if (candidateWords.isEmpty()) return false
+
+        return selected.any { existing ->
+            val existingWords = tokenize(
+                existing.segments.joinToString(" ") { it.text }
+            ).toSet()
+            if (existingWords.isEmpty()) return false
+
+            val intersection = candidateWords.intersect(existingWords).size
+            val union = candidateWords.union(existingWords).size
+            val similarity = if (union == 0) 0.0 else intersection.toDouble() / union
+
+            // Aynı konunun neredeyse aynı cümleleri tekrar seçilmesin.
+            similarity >= 0.58
+        }
     }
 
     private fun topicCoverageScore(
