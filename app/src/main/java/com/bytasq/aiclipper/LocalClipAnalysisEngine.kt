@@ -104,9 +104,9 @@ class LocalClipAnalysisEngine(
 
         if (unique.isEmpty()) return 0
 
-        val weighted = unique.fold(0) { total, word ->
+        val weighted = unique.sumOf { word ->
             val frequency = globalTermFrequency[word] ?: 0
-            total + when {
+            when {
                 frequency >= 8 -> 3
                 frequency >= 4 -> 2
                 frequency >= 2 -> 1
@@ -178,6 +178,7 @@ class LocalClipAnalysisEngine(
             progress(((index + 1) * 100) / variants.size)
             builder()?.let { candidates += it }
         }
+
         return candidates.distinctBy {
             it.segments.joinToString("|") { s -> "${s.startMs}-${s.endMs}" }
         }
@@ -356,7 +357,8 @@ class LocalClipAnalysisEngine(
                 )
 
                 if (
-                    selected.values.size >= 2 &&                    covered >= 8 &&
+                    selected.values.size >= 2 &&
+                    covered >= 8 &&
                     marginalGain < 0.22 &&
                     !flow.needsCause &&
                     !flow.needsSolution &&
@@ -535,7 +537,8 @@ class LocalClipAnalysisEngine(
         }
 
         // Sonra ileri doğru giderek "örnek -> sonuç -> kapanış" zincirini
-        // tamamla. Bir sonuç cümlesi bulunduğunda konu tamamlanmış kabul edilir.        reference = best
+        // tamamla. Bir sonuç cümlesi bulunduğunda konu tamamlanmış kabul edilir.
+        reference = best
         i = bestIndex + 1
         var forwardSteps = 0
         var completionFound = false
@@ -714,7 +717,8 @@ class LocalClipAnalysisEngine(
         val result = containsAny(resultSignals)
         val example = containsAny(exampleSignals)
 
-        val tokens = tokenize(normalized).toSet()        val uniqueInformation = tokens.size.coerceAtMost(24)
+        val tokens = tokenize(normalized).toSet()
+        val uniqueInformation = tokens.size.coerceAtMost(24)
         val informationGain = (uniqueInformation / 24.0).coerceIn(0.0, 1.0)
 
         return InformationFlowState(
@@ -794,6 +798,13 @@ class LocalClipAnalysisEngine(
 
         return (ratio * 8.0).toInt().coerceIn(0, 8)
     }
+
+    private data class TopicBlock(
+        val index: Int,
+        val segments: List<ScoredSegment>,
+        val score: Int,
+        val durationMs: Long
+    )
 
     private data class SummaryUnit(
         val id: Int,
@@ -893,7 +904,8 @@ class LocalClipAnalysisEngine(
         )
     }
 
-    private fun chooseNarrativeStart(        scored: List<ScoredSegment>,
+    private fun chooseNarrativeStart(
+        scored: List<ScoredSegment>,
         anchorIndex: Int
     ): Int {
         var start = anchorIndex
@@ -1073,3 +1085,65 @@ class LocalClipAnalysisEngine(
             "sonuç olarak", "kısacası", "özetle", "özetlemek gerekirse",
             "demek ki", "bu yüzden", "dolayısıyla", "unutmayın",
             "aklınızda olsun", "işin özü", "sonunda"
+        ).any { normalized.contains(it) }
+    }
+
+    private fun mergeNearby(input: List<ClipSegment>): List<ClipSegment> {
+        if (input.isEmpty()) return emptyList()
+        val out = mutableListOf<ClipSegment>()
+
+        for (segment in input.sortedBy { it.startMs }) {
+            val previous = out.lastOrNull()
+            if (previous != null && segment.startMs - previous.endMs <= 1_500L) {
+                out[out.lastIndex] = ClipSegment(
+                    previous.startMs,
+                    maxOf(previous.endMs, segment.endMs)
+                )
+            } else {
+                out += segment
+            }
+        }
+        return out
+    }
+
+    private fun overlap(a: ScoredSegment, b: ScoredSegment): Boolean {
+        return minOf(a.endMs, b.endMs) > maxOf(a.startMs, b.startMs)
+    }
+
+    private fun candidateSegmentsOverlap(a: AiClipCandidate, b: AiClipCandidate): Boolean {
+        return a.segments.any { sa ->
+            b.segments.any { sb ->
+                minOf(sa.endMs, sb.endMs) > maxOf(sa.startMs, sb.startMs)
+            }
+        }
+    }
+
+    private fun buildTitle(hook: String): String {
+        val clean = hook.replace(Regex("\\s+"), " ").trim()
+        return if (clean.length <= 70) clean else clean.take(67).trimEnd() + "..."
+    }
+
+    private data class ScoredSegment(
+        val startMs: Long,
+        val endMs: Long,
+        val score: Int,
+        val text: String,
+        val index: Int
+    )
+
+    private companion object {
+        val STOP_WORDS = setOf(
+            "ve", "veya", "ile", "için", "ama", "fakat", "ancak", "bir",
+            "bu", "şu", "o", "da", "de", "ki", "çok", "daha", "en", "gibi",
+            "olan", "olarak", "ise", "ben", "sen", "biz", "siz", "onlar",
+            "nasıl", "neden", "çünkü", "şimdi", "zaten", "bunu", "böyle"
+        )
+
+        val KEYWORDS = listOf(
+            "önemli", "dikkat", "neden", "nasıl", "çünkü", "sonuç", "sebep",
+            "fark", "sorun", "çözüm", "gerçek", "inanılmaz", "şaşırtıcı",
+            "kritik", "tehlike", "avantaj", "dezavantaj", "asıl", "unutmayın",
+            "aslında", "özellikle", "kesinlikle", "ilk", "son", "en önemli"
+        )
+    }
+}
