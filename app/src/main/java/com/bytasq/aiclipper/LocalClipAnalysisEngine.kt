@@ -149,8 +149,8 @@ class LocalClipAnalysisEngine(
                 score = (
                     average * 0.45 +
                     maxScore * 0.55 +
-                    if (hasConclusionSignal(text)) 25 else 0 +
-                    if (isNaturalEnding(items.last().text)) 5 else 0
+                    (if (hasConclusionSignal(text)) 25 else 0) +
+                    (if (isNaturalEnding(items.last().text)) 5 else 0)
                 ).toInt(),
                 durationMs = items.last().endMs - items.first().startMs
             )
@@ -234,8 +234,8 @@ class LocalClipAnalysisEngine(
             topicIndex = topicIndex,
             segments = segments,
             score = segments.map { it.score }.average().toInt() +
-                if (hasConclusionSignal(text)) 25 else 0 +
-                if (isNaturalEnding(segments.last().text)) 5 else 0
+                (if (hasConclusionSignal(text)) 25 else 0) +
+                (if (isNaturalEnding(segments.last().text)) 5 else 0)
         )
     }
 
@@ -345,10 +345,19 @@ class LocalClipAnalysisEngine(
             }
 
             if (add(unit)) {
-                // Yeterli yeni bilgi kalmadığında aşağıdaki adaylar gereksiz
-                // uzatma yaratmasın.
+                // Yeni bilgi azalmaya başladığında özeti yapay olarak uzatma.
+                // Topic coverage tek başına yeterli değildir; aynı konuya ait
+                // tekrar eden üniteler düşük marjinal bilgi taşıyabilir.
                 val covered = topicCoverageScore(selected.values, units)
-                if (covered >= 8 && selected.values.size >= 2) break
+                val marginalGain = marginalInformationGain(unit, selected.values)
+
+                if (
+                    selected.values.size >= 2 &&
+                    covered >= 8 &&
+                    marginalGain < 0.22
+                ) {
+                    break
+                }
             }
         }
 
@@ -503,6 +512,26 @@ class LocalClipAnalysisEngine(
             // Aynı konunun neredeyse aynı cümleleri tekrar seçilmesin.
             similarity >= 0.58
         }
+    }
+
+    private fun marginalInformationGain(
+        candidate: SummaryUnit,
+        selected: Collection<SummaryUnit>
+    ): Double {
+        if (selected.isEmpty()) return 1.0
+
+        val candidateWords = tokenize(
+            candidate.segments.joinToString(" ") { it.text }
+        ).toSet()
+
+        if (candidateWords.isEmpty()) return 0.0
+
+        val coveredWords = selected
+            .flatMap { tokenize(it.segments.joinToString(" ") { s -> s.text }) }
+            .toSet()
+
+        val newWords = candidateWords - coveredWords
+        return newWords.size.toDouble() / candidateWords.size.toDouble()
     }
 
     private fun topicCoverageScore(
@@ -738,16 +767,27 @@ class LocalClipAnalysisEngine(
     ): Boolean {
         if (current.isEmpty()) return false
 
-        val recent = current.takeLast(3)
-            .flatMap { tokenize(it.text) }
-            .toSet()
         val nextWords = tokenize(next.text).toSet()
+        if (nextWords.isEmpty()) return false
 
-        if (recent.isEmpty() || nextWords.isEmpty()) return false
+        // Son 2-3 cümle yerine bütün mevcut konu bloğunun kelime dağılımını
+        // kullanıyoruz. Böylece aynı konu farklı cümlelerle ilerlediğinde
+        // blok gereksiz yere parçalanmıyor.
+        val topicWords = current
+            .flatMap { tokenize(it.text) }
+            .groupingBy { it }
+            .eachCount()
 
-        val intersection = recent.intersect(nextWords).size
-        val union = recent.union(nextWords).size
-        val similarity = if (union == 0) 0.0 else intersection.toDouble() / union
+        val topicVocabulary = topicWords.keys
+        if (topicVocabulary.isEmpty()) return false
+
+        val intersection = topicVocabulary.intersect(nextWords).size
+        val union = topicVocabulary.union(nextWords).size
+        val jaccard = if (union == 0) 0.0 else intersection.toDouble() / union
+
+        // Yeni cümlenin önemli kelimelerinin ne kadarı mevcut konuya ait?
+        // Kısa cümlelerde Jaccard tek başına fazla sert olabilir.
+        val nextCoverage = intersection.toDouble() / nextWords.size.coerceAtLeast(1)
 
         val transitionWords = listOf(
             "şimdi", "peki", "gelelim", "diğer", "başka", "bir sonraki",
@@ -755,15 +795,28 @@ class LocalClipAnalysisEngine(
             "buradan", "devamında", "bir diğer konu"
         )
 
+        val normalizedNext = next.text.trim().lowercase()
         val startsNewTopic = transitionWords.any {
-            next.text.trim().lowercase().startsWith(it)
+            normalizedNext.startsWith(it)
         }
 
-        // Tek bir kısa cümlede ortak kelime bulunmaması yeni konu anlamına
-        // gelmez. Önceki sürümde similarity < 0.08 bu nedenle aynı konuyu
-        // gereksiz biçimde parçalara ayırabiliyordu.
-        // Çok güçlü bir geçiş yoksa yeni konu kararı ancak belirgin kopuşta verilir.
-        return startsNewTopic || similarity < 0.025
+        // Çok güçlü geçiş ifadeleri yeni konuyu doğrudan başlatabilir.
+        if (startsNewTopic && nextWords.size >= 4) return true
+
+        // Uzun bir blokta yalnızca çok düşük ortaklık varsa yeni konu kabul et.
+        // 25+ saniyelik bloklarda aynı konunun farklı kelimelerle anlatılması
+        // normaldir; bu yüzden kısa cümlelerde daha toleranslıyız.
+        val currentDuration = current.last().endMs - current.first().startMs
+        val hardBreak = when {
+            currentDuration >= 90_000L ->
+                jaccard < 0.045 && nextCoverage < 0.18
+            currentDuration >= 45_000L ->
+                jaccard < 0.035 && nextCoverage < 0.15
+            else ->
+                jaccard < 0.025 && nextCoverage < 0.12
+        }
+
+        return hardBreak
     }
 
     private fun tokenize(text: String): List<String> {
