@@ -56,7 +56,7 @@ class ClipProcessingService : Service() {
             .putString("status", "Video hazırlanıyor...")
             .apply()
 
-        val videoUri = if (youtubeUrl.isNotBlank()) {
+        val videoUri = if (youtubeUrl.isNotBlank() && uri.scheme != "file") {
             updateState("PROCESSING", 0.05f, "YouTube videosu indiriliyor...")
             val file = YouTubeVideoDownloader(this).download(youtubeUrl) { progress ->
                 updateState(
