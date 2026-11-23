@@ -96,23 +96,14 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
     ): List<AiClipCandidate> {
         if (blocks.isEmpty()) return emptyList()
 
-        /*
-         * A topic block can be very long (for example 13 minutes when the
-         * speaker stays on one subject). Never treat all blocks as mandatory.
-         * Split long blocks into summary units and select only enough units to
-         * make a coherent 60-120 second Short. 180 seconds is an exceptional
-         * ceiling, not the normal target.
-         */
         val units = splitIntoSummaryUnits(blocks)
         if (units.isEmpty()) return emptyList()
 
-        val candidates = listOf(
+        return listOf(
             buildSummaryCandidate(units, preferConclusion = true),
             buildSummaryCandidate(units, preferConclusion = false),
             buildSummaryCandidate(units, preferConclusion = true, preferDiverseTopics = true)
-        ).filterNotNull()
-
-        return candidates.distinctBy {
+        ).filterNotNull().distinctBy {
             it.segments.joinToString("|") { s -> "undefined-undefined" }
         }
     }
@@ -128,8 +119,6 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             for (segment in block.segments) {
                 val segmentDuration = segment.endMs - segment.startMs
 
-                // Keep a unit around 20-30 seconds. A segment itself is never
-                // cut because its timestamp is the smallest reliable boundary.
                 if (
                     current.isNotEmpty() &&
                     currentDuration >= 22_000L &&
@@ -195,21 +184,14 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             val unitDuration = unit.durationMs
             if (unitDuration <= 0L) return false
 
-            // Normal target: 60-120 seconds. Do not exceed 120 while filling
-            // unless the final conclusion is needed and still fits the 180s
-            // exceptional ceiling.
-            val normalCap = 120_000L
-            val hardCap = 180_000L
-            val remaining = hardCap - duration
+            // 180 seconds is only a safety ceiling. There is no artificial
+            // 60/120 second target. The summary naturally determines the
+            // final duration.
+            if (duration + unitDuration > 180_000L) return false
 
-            if (unitDuration <= remaining &&
-                (duration + unitDuration <= normalCap || unit === conclusion)
-            ) {
-                selected[unit.id] = unit
-                duration += unitDuration
-                return true
-            }
-            return false
+            selected[unit.id] = unit
+            duration += unitDuration
+            return true
         }
 
         add(first)
@@ -223,7 +205,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             .sortedByDescending { it.score }
 
         for (unit in ranked) {
-            if (duration >= 120_000L) break
+            if (duration >= 180_000L) break
 
             if (preferDiverseTopics) {
                 val existingTopics = selected.values.map { it.topicIndex }.toSet()
@@ -235,33 +217,19 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             add(unit)
         }
 
-        // If we have less than one minute, fill with the strongest remaining
-        // units. This prevents a valid but too-short "summary" from being
-        // returned for a normal-length source.
-        if (duration < 60_000L) {
-            for (unit in units.sortedByDescending { it.score }) {
-                if (duration >= 60_000L) break
-                add(unit)
-            }
-        }
-
-        if (duration < 60_000L) return null
-
-        // If the conclusion was not included and it fits the exceptional
-        // ceiling, add it. This is preferable to ending before the topic's
-        // conclusion.
-        if (conclusion != null && conclusion.id !in selected) {
-            add(conclusion)
-        }
-
+        // For a very short source/summary, keep the selected material rather
+        // than padding it with unrelated content. There is intentionally no
+        // minimum-duration rule.
         val ordered = selected.values.sortedBy { it.segments.first().startMs }
+        if (ordered.isEmpty()) return null
+
         val clipSegments = mergeNearby(
             ordered.flatMap { it.segments }
                 .map { ClipSegment(it.startMs, it.endMs) }
         )
 
         val finalDuration = clipSegments.sumOf { it.endMs - it.startMs }
-        if (finalDuration !in 60_000L..180_000L) return null
+        if (finalDuration <= 0L || finalDuration > 180_000L) return null
 
         val hasFinalConclusion = conclusion != null &&
             selected.containsKey(conclusion.id)
@@ -273,7 +241,7 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
 
         val score = (
             selected.values.map { it.score }.average() +
-                if (hasFinalConclusion) 20 else 0 +
+                (if (hasFinalConclusion) 20 else 0) +
                 min(topicCount * 4, 16) +
                 min(coherence * 3, 12)
             ).toInt().coerceIn(45, 99)
@@ -286,9 +254,9 @@ class LocalClipAnalysisEngine : ClipAnalysisEngine {
             score = score,
             hook = hook,
             reason = if (hasFinalConclusion) {
-                "Videonun önemli bölümleri 1-2 dakikalık Short içinde birleştirildi ve konu sonucu korunarak tamamlandı."
+                "Önemli bölümler birleştirildi; konu sonuç korunarak mümkün olan en kısa biçimde tamamlandı."
             } else {
-                "Videonun ana fikirleri seçilerek 1-2 dakikalık Short haline getirildi."
+                "Videonun ana fikirleri seçilerek konu bütünlüğü korunacak şekilde özetlendi."
             },
             suggestedTitle = buildTitle(hook),
             segments = clipSegments
