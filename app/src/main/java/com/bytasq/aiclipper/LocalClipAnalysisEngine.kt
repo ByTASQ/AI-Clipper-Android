@@ -486,18 +486,31 @@ class LocalClipAnalysisEngine(
         ): Boolean {
             val state = informationState(selectedUnits)
             val nextState = informationState(selectedUnits + next)
+            val nextRole = informationRole(textOf(next))
 
-            // Konu bir problem/neden/çözüm zinciri başlattıysa, zincirin
-            // eksik halkasını tamamlamadan yalnızca "yüksek skor" nedeniyle
-            // kesme. Bu, "sorun -> neden -> çözüm -> sonuç" akışını korur.
-            if (state.needsSolution && nextState.hasSolution) return true
-            if (state.needsCause && nextState.hasCause) return true
-            if (state.needsResult && nextState.hasResult) return true
-            if (state.hasSolution && !state.hasResult && nextState.hasResult) return true
-            if (state.hasCause && !state.hasSolution && nextState.hasSolution) return true
+            // Öncelik anlatım sırasıdır: problem -> neden -> çözüm -> sonuç/örnek.
+            // Anahtar kelime tek başına yeterli değildir; bir sonraki ünite,
+            // eksik halkayı gerçekten taşıyorsa konu zincirine dahil edilir.
+            val completesMissingLink =
+                (state.needsCause && nextRole == InformationRole.CAUSE) ||
+                    (state.needsSolution && nextRole == InformationRole.SOLUTION) ||
+                    (state.needsResult &&
+                        (nextRole == InformationRole.RESULT ||
+                            nextRole == InformationRole.EXAMPLE))
 
-            // Bilgi akışı zaten tamamlandıysa, sonraki parça yalnızca aynı
-            // konuyu tekrar ediyorsa eklenmesin.
+            if (completesMissingLink) return true
+
+            // Çözüm/sonuç henüz tamamlanmadıysa aynı konunun devamı olan,
+            // düşük skorla bile olsa anlatımı sürdüren üniteyi koru.
+            if (!state.isComplete &&
+                nextRole != InformationRole.NONE &&
+                nextState.informationGain >= 0.10
+            ) {
+                return true
+            }
+
+            // Bilgi akışı tamamlandıysa düşük bilgi kazancı olan parçalar
+            // sadece süreyi uzatmak için eklenmesin.
             if (state.isComplete && nextState.informationGain < 0.18) return false
 
             return nextState.informationGain >= 0.18
@@ -585,6 +598,63 @@ class LocalClipAnalysisEngine(
             .sortedBy { it.segments.first().startMs }
     }
 
+    private enum class InformationRole {
+        PROBLEM,
+        CAUSE,
+        SOLUTION,
+        EXAMPLE,
+        RESULT,
+        NONE
+    }
+
+    private fun informationRole(text: String): InformationRole {
+        val normalized = text.lowercase().replace(Regex("\\s+"), " ").trim()
+
+        val resultSignals = listOf(
+            "sonuç olarak", "kısacası", "özetle", "dolayısıyla",
+            "demek ki", "böylece", "işe yaradı", "işe yarıyor",
+            "düzeldi", "çözüldü", "tamamlandı"
+        )
+        if (resultSignals.any { normalized.contains(it) }) {
+            return InformationRole.RESULT
+        }
+
+        val solutionSignals = listOf(
+            "çözüm", "çözümü", "yapmanız", "uygulayın", "kullanın",
+            "değiştirin", "ayar", "yöntem", "şöyle yap", "şunu yap",
+            "kontrol edin", "öneri", "tavsiye"
+        )
+        if (solutionSignals.any { normalized.contains(it) }) {
+            return InformationRole.SOLUTION
+        }
+
+        val exampleSignals = listOf(
+            "örneğin", "mesela", "örnek olarak", "test ettik",
+            "denedik", "uyguladık", "yüzde", "%", "saniye", "dakika"
+        )
+        if (exampleSignals.any { normalized.contains(it) }) {
+            return InformationRole.EXAMPLE
+        }
+
+        val causeSignals = listOf(
+            "çünkü", "sebebi", "sebep", "nedeni", "nedeniyle",
+            "kaynaklan", "bundan dolayı", "şundan dolayı", "asıl nedeni"
+        )
+        if (causeSignals.any { normalized.contains(it) }) {
+            return InformationRole.CAUSE
+        }
+
+        val problemSignals = listOf(
+            "sorun", "problem", "hata", "şikayet", "sıkıntı",
+            "risk", "tehlike", "olmadı", "çalışmıyor"
+        )
+        if (problemSignals.any { normalized.contains(it) }) {
+            return InformationRole.PROBLEM
+        }
+
+        return InformationRole.NONE
+    }
+
     private data class InformationFlowState(
         val hasProblem: Boolean,
         val hasCause: Boolean,
@@ -615,7 +685,7 @@ class LocalClipAnalysisEngine(
         }
 
         val problemSignals = listOf(
-            "sorun", "problem", "hata", "şikayet", "neden", "niçin",
+            "sorun", "problem", "hata", "şikayet",
             "sıkıntı", "risk", "tehlike", "olmadı", "çalışmıyor"
         )
         val causeSignals = listOf(
