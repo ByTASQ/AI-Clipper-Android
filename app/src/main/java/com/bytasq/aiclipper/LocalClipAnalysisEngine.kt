@@ -104,9 +104,9 @@ class LocalClipAnalysisEngine(
 
         if (unique.isEmpty()) return 0
 
-        val weighted = unique.sumOf { word ->
+        val weighted = unique.fold(0) { total, word ->
             val frequency = globalTermFrequency[word] ?: 0
-            when {
+            total + when {
                 frequency >= 8 -> 3
                 frequency >= 4 -> 2
                 frequency >= 2 -> 1
