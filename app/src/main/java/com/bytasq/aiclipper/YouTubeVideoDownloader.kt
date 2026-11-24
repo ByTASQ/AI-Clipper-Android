@@ -108,7 +108,7 @@ class YouTubeVideoDownloader(private val context: Context) {
         return try {
             if (!file.isFile) return -1
             val text = file.readText()
-            Regex("""\"percent\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)""")
+            Regex("""\"percent\"\s*:\s*([0-9]+(?:\.[0-9]+)?)""")
                 .find(text)
                 ?.groupValues
                 ?.getOrNull(1)
