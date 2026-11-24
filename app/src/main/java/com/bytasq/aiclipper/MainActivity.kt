@@ -205,20 +205,23 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
             // Eski kodda Downloading(0) ile başlatılıyor ancak servis progress'i
             // yalnızca SharedPreferences'a yazıldığı için ekranda %0 kalıyordu.
             if (state == "PROCESSING" && sharedYoutubeUrl.isNotBlank()) {
-                val downloadPercent = when {
-                    status.startsWith("Video indiriliyor...", ignoreCase = true) -> {
-                        Regex("""%([0-9]+)""").find(status)?.groupValues?.getOrNull(1)
-                            ?.toIntOrNull()?.coerceIn(0, 99)
-                    }
-                    progress >= 0.25f -> 100
-                    else -> null
-                }
-                if (downloadPercent != null) {
-                    youtubeDownloadState = if (downloadPercent >= 100) {
-                        YouTubeDownloadState.Completed
-                    } else {
-                        YouTubeDownloadState.Downloading(downloadPercent)
-                    }
+                // Toplam işlem progress'i 0.25'e ulaştığında indirme bitmiş
+                // sayılmaz; indirme sadece ilk %20'lik işlem aralığındadır.
+                val isDownloading = status.startsWith("Video indiriliyor...", ignoreCase = true) ||
+                    status.startsWith("YouTube videosu indiriliyor...", ignoreCase = true)
+
+                if (isDownloading) {
+                    val downloadPercent = Regex("""%([0-9]+)""")
+                        .find(status)
+                        ?.groupValues
+                        ?.getOrNull(1)
+                        ?.toIntOrNull()
+                        ?.coerceIn(0, 100)
+                        ?: 0
+
+                    youtubeDownloadState = YouTubeDownloadState.Downloading(downloadPercent)
+                } else {
+                    youtubeDownloadState = YouTubeDownloadState.Processing
                 }
             }
 
