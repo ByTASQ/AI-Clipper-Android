@@ -222,21 +222,101 @@ class LocalClipAnalysisEngine(
         val units = splitIntoSummaryUnits(blocks)
         if (units.isEmpty()) return emptyList()
 
+        /*
+         * Kaynak videoda birden fazla bağımsız konu varsa bunları tek Short
+         * içine doldurmak yerine her konuyu ayrı aday video yapıyoruz.
+         *
+         * Örnek:
+         *   Konu 1 -> Video 1
+         *   Konu 2 -> Video 2
+         *   Konu 3 -> Video 3
+         *
+         * Her aday yalnızca kendi topicIndex grubundaki transkript ünitelerinden
+         * oluşur ve expandForTopicCompleteness() ile konu zincirinin giriş,
+         * açıklama, çözüm/sonuç kısmı mümkün olduğunca tamamlanır.
+         */
+        val topicGroups = units
+            .groupBy { it.topicIndex }
+            .toList()
+            .sortedBy { (_, group) ->
+                group.minOfOrNull { it.segments.first().startMs } ?: Long.MAX_VALUE
+            }
+
         val candidates = mutableListOf<AiClipCandidate>()
-        val variants = listOf(
-            { buildSummaryCandidate(units, preferConclusion = true) },
-            { buildSummaryCandidate(units, preferConclusion = false) },
-            { buildSummaryCandidate(units, preferConclusion = true, preferDiverseTopics = true) }
-        )
+        val totalTopics = topicGroups.size.coerceAtLeast(1)
 
-        variants.forEachIndexed { index, builder ->
-            progress(((index + 1) * 100) / variants.size)
-            builder()?.let { candidates += it }
+        topicGroups.forEachIndexed { index, (_, group) ->
+            progress(((index + 1) * 100) / totalTopics)
+
+            val maxScore = group.maxOfOrNull { it.score } ?: 0
+            val topicDuration = group.sumOf { it.durationMs }
+
+            // Çok kısa ve düşük bilgi taşıyan blokları ayrı video yapma.
+            if (maxScore < 45 || topicDuration < 8_000L) return@forEachIndexed
+
+            val best = group.maxByOrNull { it.score } ?: return@forEachIndexed
+            val completeUnits = expandForTopicCompleteness(best, group)
+            if (completeUnits.isEmpty()) return@forEachIndexed
+
+            val selected = completeUnits
+                .sortedBy { it.segments.first().startMs }
+                .toMutableList()
+
+            val clipSegments = mergeNearby(
+                selected.flatMap { it.segments }
+                    .map { ClipSegment(it.startMs, it.endMs) }
+            )
+
+            val duration = clipSegments.sumOf { it.endMs - it.startMs }
+            if (duration <= 0L || duration > 180_000L) return@forEachIndexed
+
+            val topicText = selected.joinToString(" ") {
+                it.segments.joinToString(" ") { segment -> segment.text }
+            }
+
+            val hasConclusion = hasConclusionSignal(topicText) ||
+                isNaturalEnding(selected.last().segments.last().text)
+
+            val flow = detectInformationFlowState(topicText)
+            val completenessBonus = when {
+                flow.isComplete -> 14
+                hasConclusion -> 10
+                else -> 0
+            }
+
+            val score = (
+                selected.map { it.score }.average() +
+                    completenessBonus +
+                    min(selected.size * 2, 10)
+                ).toInt().coerceIn(45, 99)
+
+            val hook = selected.first().segments.first().text.take(130)
+
+            candidates += AiClipCandidate(
+                startMs = clipSegments.first().startMs,
+                endMs = clipSegments.last().endMs,
+                score = score,
+                hook = hook,
+                reason = if (hasConclusion || flow.isComplete) {
+                    "Bu konu bağımsız olarak özetlendi; anlatımın gerekli bölümleri ve sonucu korunarak ayrı Short hazırlandı."
+                } else {
+                    "Bu konu bağımsız olarak seçildi; gereksiz tekrarlar çıkarılarak konu bütünlüğü korunacak şekilde Short hazırlandı."
+                },
+                suggestedTitle = buildTitle(hook),
+                segments = clipSegments
+            )
         }
 
-        return candidates.distinctBy {
-            it.segments.joinToString("|") { s -> "${s.startMs}-${s.endMs}" }
-        }
+        /*
+         * Videoları kaynak videodaki konu sırasına göre döndür. Böylece
+         * Video 1 -> konu 1, Video 2 -> konu 2, Video 3 -> konu 3 şeklinde
+         * üretim ve ekranda gösterim yapılır.
+         */
+        return candidates
+            .sortedBy { it.startMs }
+            .distinctBy {
+                it.segments.joinToString("|") { s -> "${s.startMs}-${s.endMs}" }
+            }
     }
 
     private fun splitIntoSummaryUnits(blocks: List<TopicBlock>): List<SummaryUnit> {
