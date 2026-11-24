@@ -28,15 +28,32 @@ class LocalClipAnalysisEngine(
 
         onProgress(42, "Konular belirleniyor...")
         val blocks = buildTopicBlocks(scored)
-        if (blocks.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
+        if (blocks.isEmpty()) {
+            val fallback = buildSafeFallback(scored, scored.maxByOrNull { it.score })
+            if (fallback != null) {
+                onProgress(98, "Güvenli video bölümü seçildi.")
+                return ClipAnalysisResult(transcript, listOf(fallback))
+            }
+            return ClipAnalysisResult(transcript, emptyList())
+        }
 
         onProgress(58, "Özet adayları hazırlanıyor...")
         val candidates = buildSummaryCandidates(scored, blocks) { percent ->
             onProgress(58 + (percent * 0.37f).toInt(), "Önemli bölümler seçiliyor... %$percent")
         }
 
+        // Ana özetleyici aday üretemediğinde işlemi "video bulunamadı" diye
+        // sonlandırma. Transkript ve zaman damgaları varsa en güçlü anlatı
+        // bölümünden güvenli bir aday oluştur.
+        val finalCandidates = if (candidates.isNotEmpty()) {
+            candidates.sortedByDescending { it.score }.take(3)
+        } else {
+            val fallback = buildSafeFallback(scored, scored.maxByOrNull { it.score })
+            if (fallback != null) listOf(fallback) else emptyList()
+        }
+
         onProgress(98, "Özet tamamlanıyor...")
-        return ClipAnalysisResult(transcript, candidates.sortedByDescending { it.score }.take(3))
+        return ClipAnalysisResult(transcript, finalCandidates)
     }
 
     private fun scoreSegments(
