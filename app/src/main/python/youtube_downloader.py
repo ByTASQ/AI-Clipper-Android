@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import yt_dlp
 
 def download(url, output_dir, cookie_file=None, user_agent=None):
@@ -7,14 +8,33 @@ def download(url, output_dir, cookie_file=None, user_agent=None):
 
     output = os.path.join(output_dir, "aiclipper_source_%d.%%(ext)s" % time.time_ns())
 
+    progress_path = os.path.join(output_dir, "aiclipper_download_progress.json")
+
+    def progress_hook(data):
+        try:
+            payload = {
+                "status": data.get("status", ""),
+                "downloaded": data.get("downloaded_bytes", 0),
+                "total": data.get("total_bytes") or data.get("total_bytes_estimate") or 0,
+                "percent": float(data.get("_percent_str", "0%").replace("%", "").strip() or 0)
+            }
+            tmp = progress_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f)
+            os.replace(tmp, progress_path)
+        except Exception:
+            pass
+
     options = {
         "outtmpl": output,
         "noplaylist": True,
         "quiet": False,
         "no_warnings": False,
         "retries": 3,
-        "fragment_retries": 5,
-        "extractor_retries": 3,
+        "fragment_retries": 3,
+        "extractor_retries": 2,
+        "socket_timeout": 15,
+        "progress_hooks": [progress_hook],
         "forceipv4": True,
         "format": "bestvideo+bestaudio/best",
         "merge_output_format": "mp4",
