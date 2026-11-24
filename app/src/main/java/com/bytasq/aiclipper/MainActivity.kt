@@ -232,24 +232,51 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                 }
 
                 "COMPLETED" -> {
-                    val path = prefs.getString("filePath", "").orEmpty()
-                    if (path.isNotBlank() && File(path).isFile) {
-                        val clip = GeneratedClip(
-                            fileName = prefs.getString("fileName", File(path).name).orEmpty(),
-                            filePath = path,
-                            title = prefs.getString("title", "AI Short").orEmpty(),
-                            description = prefs.getString("description", "").orEmpty(),
-                            hashtags = prefs.getString("hashtags", "")
-                                .orEmpty()
-                                .split("|")
-                                .filter { it.isNotBlank() },
-                            score = prefs.getInt("score", 0)
-                        )
-                        generatedClips = listOf(clip)
-                        previewVideo = Uri.fromFile(File(path))
+                    val count = prefs.getInt("clipCount", 0)
+                    val clips = if (count > 0) {
+                        (0 until count).mapNotNull { index ->
+                            val path = prefs.getString("filePath_" + index, "").orEmpty()
+                            if (path.isBlank() || !File(path).isFile) return@mapNotNull null
+
+                            GeneratedClip(
+                                fileName = prefs.getString("fileName_" + index, File(path).name).orEmpty(),
+                                filePath = path,
+                                title = prefs.getString("title_" + index, "AI Short").orEmpty(),
+                                description = prefs.getString("description_" + index, "").orEmpty(),
+                                hashtags = prefs.getString("hashtags_" + index, "")
+                                    .orEmpty()
+                                    .split("|")
+                                    .filter { it.isNotBlank() },
+                                score = prefs.getInt("score_" + index, 0)
+                            )
+                        }
+                    } else {
+                        val path = prefs.getString("filePath", "").orEmpty()
+                        if (path.isNotBlank() && File(path).isFile) {
+                            listOf(
+                                GeneratedClip(
+                                    fileName = prefs.getString("fileName", File(path).name).orEmpty(),
+                                    filePath = path,
+                                    title = prefs.getString("title", "AI Short").orEmpty(),
+                                    description = prefs.getString("description", "").orEmpty(),
+                                    hashtags = prefs.getString("hashtags", "")
+                                        .orEmpty()
+                                        .split("|")
+                                        .filter { it.isNotBlank() },
+                                    score = prefs.getInt("score", 0)
+                                )
+                            )
+                        } else {
+                            emptyList()
+                        }
+                    }
+
+                    if (clips.isNotEmpty()) {
+                        generatedClips = clips
+                        previewVideo = Uri.fromFile(File(clips.first().filePath))
                         playPreview = true
                         playSelection = false
-                        batchExportState = BatchExportState.Completed(1)
+                        batchExportState = BatchExportState.Completed(clips.size)
                         analysisState = AnalysisState.Completed(emptyList())
                         youtubeDownloadState = YouTubeDownloadState.Completed
                     }
@@ -509,45 +536,52 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                     }
                 }
 
-                generatedClips.firstOrNull()?.let { clip ->
-                    Card(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text(
-                                "Sonuç Videosu",
-                                style = MaterialTheme.typography.titleLarge
-                            )
+                if (generatedClips.isNotEmpty()) {
+                    Text(
+                        generatedClips.size.toString() + " ayrı Short hazırlandı",
+                        style = MaterialTheme.typography.titleLarge
+                    )
 
-                            Text(
-                                clip.title,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-
-                            GeneratedClipVideoPreview(
-                                filePath = clip.filePath,
-                                onPlaybackCompleted = {}
-                            )
-
-                            Button(
-                                onClick = { approvalClip = clip },
-                                modifier = Modifier.fillMaxWidth()
+                    generatedClips.forEachIndexed { index, clip ->
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text("Onayla ve Paylaş")
-                            }
+                                Text(
+                                    "Short " + (index + 1),
+                                    style = MaterialTheme.typography.titleMedium
+                                )
 
-                            TextButton(
-                                onClick = {
-                                    generatedClips = emptyList()
-                                    sharedYoutubeUrl = youtubeUrlInput.trim()
-                                    youtubeRequestId += 1
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Yeniden Oluştur")
+                                Text(
+                                    clip.title,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+
+                                GeneratedClipVideoPreview(
+                                    filePath = clip.filePath,
+                                    onPlaybackCompleted = {}
+                                )
+
+                                Button(
+                                    onClick = { approvalClip = clip },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Onayla ve Paylaş")
+                                }
                             }
                         }
+                    }
+
+                    TextButton(
+                        onClick = {
+                            generatedClips = emptyList()
+                            sharedYoutubeUrl = youtubeUrlInput.trim()
+                            youtubeRequestId += 1
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Yeniden Oluştur")
                     }
                 }
             }
