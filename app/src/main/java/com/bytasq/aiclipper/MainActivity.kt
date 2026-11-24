@@ -376,7 +376,19 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                             previewVideo = null
                             generatedClips = emptyList()
                             analysisError = null
-                            youtubeDownloadState = YouTubeDownloadState.Idle
+                            analysisState = AnalysisState.Analyzing
+                            batchExportState = BatchExportState.Exporting(0, 1)
+                            analysisProgress = 0f
+                            analysisStatus = "İstek başlatılıyor..."
+                            youtubeDownloadState = YouTubeDownloadState.Downloading(0)
+
+                            // Önceki başarısız işlemin durumu ekranda kalmasın.
+                            context.getSharedPreferences(
+                                ClipProcessingService.PREFS,
+                                android.content.Context.MODE_PRIVATE
+                            ).edit().clear().apply()
+
+                            // Her buton tıklaması yeni URL'yi sıfırdan başlatır.
                             sharedYoutubeUrl = url
                             youtubeRequestId += 1
                         }
