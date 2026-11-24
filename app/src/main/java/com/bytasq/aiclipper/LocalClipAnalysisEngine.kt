@@ -13,8 +13,9 @@ class LocalClipAnalysisEngine(
     private val onProgress: (Int, String) -> Unit = { _, _ -> }
 ) : ClipAnalysisEngine {
     override suspend fun analyze(transcript: Transcript): ClipAnalysisResult {
-        val segments = transcript.segments
-            .filter { it.text.isNotBlank() && it.endMs > it.startMs }
+        val segments = expandLongTranscriptSegments(
+            transcript.segments
+        ).filter { it.text.isNotBlank() && it.endMs > it.startMs }
 
         if (segments.isEmpty()) return ClipAnalysisResult(transcript, emptyList())
 
@@ -54,6 +55,43 @@ class LocalClipAnalysisEngine(
 
         onProgress(98, "Özet tamamlanıyor...")
         return ClipAnalysisResult(transcript, finalCandidates)
+    }
+
+    /**
+     * Bazı transkript sağlayıcıları çok uzun bir metni tek zaman aralığı
+     * olarak döndürebilir. Böyle bir segmenti doğrudan klip olarak kullanmak
+     * 10 dakikalık kaynak videonun tamamının Short olmasına yol açar.
+     *
+     * Metnin gerçek kelime zamanları elimizde değilse zaman aralığını yaklaşık
+     * 24 saniyelik analiz pencerelerine bölüyoruz. Bu yalnızca güvenlik/fallback
+     * davranışıdır; normal YouTube altyazı segmentleri aynen korunur.
+     */
+    private fun expandLongTranscriptSegments(
+        segments: List<TranscriptSegment>
+    ): List<TranscriptSegment> {
+        val maxWindowMs = 24_000L
+        val result = mutableListOf<TranscriptSegment>()
+
+        for (segment in segments) {
+            val duration = segment.endMs - segment.startMs
+            if (duration <= maxWindowMs) {
+                result += segment
+                continue
+            }
+
+            var start = segment.startMs
+            while (start < segment.endMs) {
+                val end = minOf(start + maxWindowMs, segment.endMs)
+                result += TranscriptSegment(
+                    startMs = start,
+                    endMs = end,
+                    text = segment.text
+                )
+                start = end
+            }
+        }
+
+        return result
     }
 
     private fun scoreSegments(
@@ -898,9 +936,17 @@ class LocalClipAnalysisEngine(
 
         val narrative = scored.subList(startIndex, bestEnd + 1)
         val startMs = narrative.first().startMs
-        val endMs = narrative.last().endMs
-        val duration = endMs - startMs
+        var endMs = narrative.last().endMs
 
+        // Tek bir transkript segmenti tüm kaynak videoyu kapsıyorsa,
+        // segment sınırını doğrudan kullanmak kaynak videonun tamamını
+        // Short olarak üretir. Güvenlik tavanını burada da uygula.
+        val safetyEnd = (startMs + 180_000L).coerceAtMost(scored.last().endMs)
+        if (endMs > safetyEnd) {
+            endMs = safetyEnd
+        }
+
+        val duration = endMs - startMs
         if (duration <= 0L) return null
 
         val text = narrative.joinToString(" ") { it.text }
