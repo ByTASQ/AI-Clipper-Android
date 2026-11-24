@@ -16,6 +16,9 @@ import com.chaquo.python.android.AndroidPlatform
 import java.io.File
 import java.io.FileWriter
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -40,7 +43,7 @@ class YouTubeVideoDownloader(private val context: Context) {
         }
     }
 
-    private fun downloadLocally(
+    private suspend fun downloadLocally(
         url: String,
         webCookies: WebCookieSession?,
         onProgress: (Int) -> Unit
@@ -54,19 +57,38 @@ class YouTubeVideoDownloader(private val context: Context) {
             val python = Python.getInstance()
             val module = python.getModule("youtube_downloader")
 
-            onProgress(5)
+            onProgress(1)
 
-            val result = module.callAttr(
-                "download",
-                url,
-                outputDir.absolutePath,
-                webCookies?.cookieFile,
-                webCookies?.userAgent
-            )
+            val progressFile = File(outputDir, "aiclipper_download_progress.json")
+            progressFile.delete()
+
+            val result = coroutineScope {
+                val task = async(Dispatchers.IO) {
+                    module.callAttr(
+                        "download",
+                        url,
+                        outputDir.absolutePath,
+                        webCookies?.cookieFile,
+                        webCookies?.userAgent
+                    ).toString()
+                }
+
+                var lastProgress = 1
+                while (!task.isCompleted) {
+                    val progress = readDownloadProgress(progressFile)
+                    if (progress >= 0) {
+                        lastProgress = progress.coerceIn(1, 99)
+                        onProgress(lastProgress)
+                    }
+                    delay(500)
+                }
+
+                task.await()
+            }
 
             onProgress(100)
 
-            val file = File(result.toString())
+            val file = File(result)
             if (file.isFile && file.length() > 0L) {
                 return file
             }
@@ -79,6 +101,22 @@ class YouTubeVideoDownloader(private val context: Context) {
                     "Python yt-dlp: " +
                     (t.message ?: t.toString()).takeLast(2500)
             )
+        }
+    }
+
+    private fun readDownloadProgress(file: File): Int {
+        return try {
+            if (!file.isFile) return -1
+            val text = file.readText()
+            Regex("""\"percent\"\\s*:\\s*([0-9]+(?:\\.[0-9]+)?)""")
+                .find(text)
+                ?.groupValues
+                ?.getOrNull(1)
+                ?.toDoubleOrNull()
+                ?.toInt()
+                ?: -1
+        } catch (_: Throwable) {
+            -1
         }
     }
 
