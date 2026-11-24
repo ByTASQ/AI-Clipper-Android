@@ -47,6 +47,8 @@ class YouTubeTranscriptTranscriptionEngine(
 
         onProgress(1, 1)
         Transcript(segments)
+    }
+
     private fun extractVideoId(value: String): String? {
         val cleaned = value.trim().trimStart('/')
         val normalized = if (
@@ -84,8 +86,4 @@ class YouTubeTranscriptTranscriptionEngine(
             null
         }
     }
-
-    private fun normalizeVideoIdCandidate(id: String): String? =
-        id.trim().takeIf { it.length == 11 }
-}    }
 }
