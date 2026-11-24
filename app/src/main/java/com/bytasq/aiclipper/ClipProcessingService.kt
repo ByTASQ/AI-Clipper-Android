@@ -18,6 +18,15 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 class ClipProcessingService : Service() {
+    private data class GeneratedClipData(
+        val filePath: String,
+        val fileName: String,
+        val title: String,
+        val description: String,
+        val hashtags: String,
+        val score: Int
+    )
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onCreate() {
@@ -114,58 +123,109 @@ class ClipProcessingService : Service() {
             updateState("PROCESSING", progress, status)
         }.analyze(transcript)
 
-        val candidate = result.candidates.firstOrNull()
-            ?: throw IllegalStateException(
+        val candidates = result.candidates
+            .filter { candidate ->
+                candidate.segments.any { it.endMs > it.startMs }
+            }
+            .sortedBy { it.startMs }
+
+        if (candidates.isEmpty()) {
+            throw IllegalStateException(
                 "Video analiz edildi ancak Short için geçerli bir anlatı bölümü üretilemedi."
             )
+        }
 
-        val renderSegments = candidate.segments.filter { it.endMs > it.startMs }
-        if (renderSegments.isEmpty()) {
-            throw IllegalStateException(
-                "Özet oluşturuldu ancak videoya dönüştürülecek zaman aralığı bulunamadı."
+        // Birden fazla bağımsız konu varsa her konu ayrı Short olarak render edilir.
+        val totalCandidates = candidates.size
+        val generated = mutableListOf<GeneratedClipData>()
+
+        candidates.forEachIndexed { index, candidate ->
+            val renderSegments = candidate.segments.filter { it.endMs > it.startMs }
+            if (renderSegments.isEmpty()) return@forEachIndexed
+
+            val totalRenderSeconds =
+                renderSegments.sumOf { it.endMs - it.startMs } / 1000L
+
+            val renderBase =
+                0.65f + (index.toFloat() / totalCandidates.coerceAtLeast(1)) * 0.28f
+
+            updateState(
+                "PROCESSING",
+                renderBase,
+                "Short " + (index + 1) + "/" + totalCandidates +
+                    " derleniyor... " + renderSegments.size +
+                    " bölüm, " + totalRenderSeconds + " saniye"
+            )
+
+            val file = ShortVideoRenderer.render(
+                context = this,
+                uri = videoUri,
+                segments = renderSegments.map { it.startMs to it.endMs }
+            )
+
+            val transcriptText = candidate.segments.joinToString(" ") { range ->
+                transcript.segments
+                    .filter { it.endMs > range.startMs && it.startMs < range.endMs }
+                    .joinToString(" ") { it.text }
+            }
+
+            val metadata = LocalClipMetadataEngine().generate(
+                transcriptText = transcriptText,
+                suggestedTitle = candidate.suggestedTitle,
+                hook = candidate.hook,
+                reason = candidate.reason
+            )
+
+            generated += GeneratedClipData(
+                filePath = file.absolutePath,
+                fileName = file.name,
+                title = metadata.title,
+                description = metadata.description,
+                hashtags = metadata.hashtags.joinToString("|"),
+                score = candidate.score
+            )
+
+            val progress =
+                0.65f + ((index + 1).toFloat() / totalCandidates) * 0.28f
+
+            updateState(
+                "PROCESSING",
+                progress,
+                "Short " + (index + 1) + "/" + totalCandidates + " hazırlandı."
             )
         }
 
-        val totalRenderSeconds = renderSegments.sumOf { it.endMs - it.startMs } / 1000L
-        updateState(
-            "PROCESSING",
-            0.65f,
-            "Short derleniyor... " + renderSegments.size +
-                " bölüm, " + totalRenderSeconds + " saniye"
-        )
-        val file = ShortVideoRenderer.render(
-            context = this,
-            uri = videoUri,
-            segments = candidate.segments.map { it.startMs to it.endMs }
-        )
-
-        updateState("PROCESSING", 0.93f, "Short bilgileri hazırlanıyor...")
-        val transcriptText = candidate.segments.joinToString(" ") { range ->
-            transcript.segments
-                .filter { it.endMs > range.startMs && it.startMs < range.endMs }
-                .joinToString(" ") { it.text }
+        if (generated.isEmpty()) {
+            throw IllegalStateException(
+                "Özet oluşturuldu ancak hiçbir Short render edilemedi."
+            )
         }
 
-        val metadata = LocalClipMetadataEngine().generate(
-            transcriptText = transcriptText,
-            suggestedTitle = candidate.suggestedTitle,
-            hook = candidate.hook,
-            reason = candidate.reason
-        )
-
-        prefs.edit()
+        val editor = prefs.edit()
             .putString("state", "COMPLETED")
             .putFloat("progress", 1f)
-            .putString("status", "Short hazırlandı.")
-            .putString("filePath", file.absolutePath)
-            .putString("fileName", file.name)
-            .putString("title", metadata.title)
-            .putString("description", metadata.description)
-            .putString("hashtags", metadata.hashtags.joinToString("|"))
-            .putInt("score", candidate.score)
-            .apply()
+            .putString(
+                "status",
+                generated.size.toString() + " ayrı Short hazırlandı."
+            )
+            .putInt("clipCount", generated.size)
 
-        updateNotification("Short hazırlandı.", 100)
+        generated.forEachIndexed { index, clip ->
+            editor
+                .putString("filePath_" + index, clip.filePath)
+                .putString("fileName_" + index, clip.fileName)
+                .putString("title_" + index, clip.title)
+                .putString("description_" + index, clip.description)
+                .putString("hashtags_" + index, clip.hashtags)
+                .putInt("score_" + index, clip.score)
+        }
+
+        editor.apply()
+
+        updateNotification(
+            generated.size.toString() + " ayrı Short hazırlandı.",
+            100
+        )
     }
 
     private suspend fun localTranscribe(videoUri: Uri): Transcript {
