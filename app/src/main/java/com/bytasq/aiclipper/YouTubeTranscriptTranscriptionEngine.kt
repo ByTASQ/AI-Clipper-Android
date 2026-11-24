@@ -16,9 +16,14 @@ class YouTubeTranscriptTranscriptionEngine(
 
         val py = Python.getInstance()
         val module = py.getModule("youtube_transcript")
+        val videoId = extractVideoId(videoUrl)
+            ?: throw IllegalArgumentException("YouTube video kimliği alınamadı.")
+
+        // Python tarafına ham URL yerine doğrudan video ID ver.
+        // Böylece /youtu.be, //youtu.be ve tam YouTube URL'leri aynı şekilde çalışır.
         val rawJson = module.callAttr(
             "fetch",
-            videoUrl,
+            videoId,
             listOf("tr", "tr-TR", "en", "en-US")
         ).toString()
 
@@ -42,5 +47,45 @@ class YouTubeTranscriptTranscriptionEngine(
 
         onProgress(1, 1)
         Transcript(segments)
+    private fun extractVideoId(value: String): String? {
+        val cleaned = value.trim().trimStart('/')
+        val normalized = if (
+            cleaned.startsWith("http://", true) ||
+            cleaned.startsWith("https://", true)
+        ) cleaned else "https://$cleaned"
+
+        return try {
+            val uri = Uri.parse(normalized)
+            val host = uri.host?.lowercase() ?: return null
+
+            when {
+                host == "youtu.be" ->
+                    uri.pathSegments.firstOrNull()?.takeIf { it.length == 11 }
+
+                host == "youtube.com" || host.endsWith(".youtube.com") -> when {
+                    uri.path.equals("/watch", true) ->
+                        uri.getQueryParameter("v")?.takeIf { it.length == 11 }
+
+                    uri.pathSegments.firstOrNull()?.equals("shorts", true) ->
+                        uri.pathSegments.getOrNull(1)?.takeIf { it.length == 11 }
+
+                    uri.pathSegments.firstOrNull()?.equals("live", true) ->
+                        uri.pathSegments.getOrNull(1)?.takeIf { it.length == 11 }
+
+                    uri.pathSegments.firstOrNull()?.equals("embed", true) ->
+                        uri.pathSegments.getOrNull(1)?.takeIf { it.length == 11 }
+
+                    else -> null
+                }
+
+                else -> null
+            }
+        } catch (_: Throwable) {
+            null
+        }
     }
+
+    private fun normalizeVideoIdCandidate(id: String): String? =
+        id.trim().takeIf { it.length == 11 }
+}    }
 }
