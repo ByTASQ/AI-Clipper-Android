@@ -82,24 +82,57 @@ class ClipProcessingService : Service() {
                         "YouTube transkripti alınıyor... $current/$total"
                     )
                 }.transcribe(videoUri)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                updateState(
+                    "PROCESSING",
+                    0.25f,
+                    "YouTube transkripti alınamadı, cihazdaki ses analiz ediliyor..."
+                )
                 localTranscribe(videoUri)
             }
         } else {
             localTranscribe(videoUri)
         }
 
-        updateState("PROCESSING", 0.52f, "Video yerel olarak özetleniyor...")
+        val validTranscriptSegments = transcript.segments.count {
+            it.text.isNotBlank() && it.endMs > it.startMs
+        }
+        if (validTranscriptSegments == 0) {
+            throw IllegalStateException(
+                "Video indirildi ancak konuşma metni çıkarılamadı. " +
+                    "YouTube altyazısı bulunamadı ve yerel ses analizi sonuç üretmedi."
+            )
+        }
+
+        updateState(
+            "PROCESSING",
+            0.52f,
+            "Video analiz ediliyor... " + validTranscriptSegments + " konuşma bölümü bulundu."
+        )
         val result = LocalClipAnalysisEngine { percent, status ->
-            // Analiz artık tek bir %52 -> %65 sıçraması değil; segment puanlama
-            // ve özet seçimi gerçek ilerlemeyle raporlanıyor.
             val progress = 0.52f + (percent / 100f) * 0.13f
             updateState("PROCESSING", progress, status)
         }.analyze(transcript)
-        val candidate = result.candidates.firstOrNull()
-            ?: throw IllegalStateException("Önemli video bölümü bulunamadı.")
 
-        updateState("PROCESSING", 0.65f, "Short videosu oluşturuluyor...")
+        val candidate = result.candidates.firstOrNull()
+            ?: throw IllegalStateException(
+                "Video analiz edildi ancak Short için geçerli bir anlatı bölümü üretilemedi."
+            )
+
+        val renderSegments = candidate.segments.filter { it.endMs > it.startMs }
+        if (renderSegments.isEmpty()) {
+            throw IllegalStateException(
+                "Özet oluşturuldu ancak videoya dönüştürülecek zaman aralığı bulunamadı."
+            )
+        }
+
+        val totalRenderSeconds = renderSegments.sumOf { it.endMs - it.startMs } / 1000L
+        updateState(
+            "PROCESSING",
+            0.65f,
+            "Short derleniyor... " + renderSegments.size +
+                " bölüm, " + totalRenderSeconds + " saniye"
+        )
         val file = ShortVideoRenderer.render(
             context = this,
             uri = videoUri,
