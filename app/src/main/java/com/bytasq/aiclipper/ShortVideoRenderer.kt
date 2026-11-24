@@ -77,7 +77,8 @@ object ShortVideoRenderer {
         endMs: Long,
         output: File
     ) {
-        val durationSeconds = (endMs - startMs) / 1000.0
+        val safeEndMs = minOf(endMs, startMs + 180_000L)
+        val durationSeconds = (safeEndMs - startMs) / 1000.0
         if (durationSeconds <= 0.05) {
             throw IllegalArgumentException("Video segmenti çok kısa.")
         }
@@ -89,8 +90,8 @@ object ShortVideoRenderer {
                 "-hide_banner",
                 "-loglevel", "error",
                 "-ss", formatSeconds(startMs),
-                "-t", formatSeconds(endMs - startMs),
                 "-i", input.absolutePath,
+                "-t", formatSeconds((safeEndMs - startMs).coerceAtMost(180_000L)),
                 "-filter_complex",
                 "[0:v]" +
                     "scale=1080:1920:force_original_aspect_ratio=increase," +
