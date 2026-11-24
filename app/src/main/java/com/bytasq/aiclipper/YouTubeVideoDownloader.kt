@@ -32,10 +32,11 @@ class YouTubeVideoDownloader(private val context: Context) {
         val normalized = normalizeYoutubeUrl(url)
             ?: throw IllegalArgumentException("Geçerli bir YouTube bağlantısı girin.")
 
-        val webCookies = collectYoutubeCookies(normalized)
-
+        // Public YouTube videolarında WebView ile cookie toplamak indirme
+        // başlamadan önce gereksiz şekilde bekleyebiliyor. yt-dlp kendi
+        // istemci erişimini kullansın; gerekirse hata doğrudan raporlanır.
         return withContext(Dispatchers.IO) {
-            downloadLocally(normalized, webCookies, onProgress)
+            downloadLocally(normalized, null, onProgress)
         }
     }
 
