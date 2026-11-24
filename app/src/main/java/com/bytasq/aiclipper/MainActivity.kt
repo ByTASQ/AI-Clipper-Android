@@ -137,42 +137,39 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
     var showProfileDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(sharedYoutubeUrl, youtubeRequestId) {
-        if (sharedYoutubeUrl.isNotBlank()) {
-            // Her yeni istek, daha önce seçilmiş/indirilmiş videodan bağımsız olarak
-            // doğrudan girilen URL'yi yeniden indirir. Eski selectedVideo kullanılamaz.
-            selectedVideo = null
-            previewVideo = null
-            playPreview = false
-            videoDurationMs = 0L
-            clipRange = 0f..0f
-            transcriptText = ""
-            transcript = null
-            analysisError = null
-            analysisState = AnalysisState.Idle
-            generatedClips = emptyList()
-            batchExportState = BatchExportState.Idle
-            youtubeDownloadState = YouTubeDownloadState.Downloading(0)
-            try {
-                    val file = YouTubeVideoDownloader(context).download(sharedYoutubeUrl) { progress ->
-                        youtubeDownloadState = YouTubeDownloadState.Downloading(progress)
-                    }
-                    selectedVideo = Uri.fromFile(file)
-                    previewVideo = selectedVideo
-                    playPreview = false
-                    analysisState = AnalysisState.Idle
-                    transcriptText = ""
-                    transcript = null
-                    analysisError = null
-                    clipRange = 0f..0f
-                    generatedClips = emptyList()
-                    batchExportState = BatchExportState.Idle
-                    autoProcessYoutube = true
-                    youtubeDownloadState = YouTubeDownloadState.Processing
-                } catch (e: Exception) {
-                    youtubeDownloadState = YouTubeDownloadState.Failed(e.message ?: "YouTube videosu indirilemedi.")
-                }
-            }
-        }
+        if (sharedYoutubeUrl.isBlank()) return@LaunchedEffect
+
+        // YouTube işleminin tek sahibi ClipProcessingService.
+        // MainActivity burada videoyu indirmez; böylece aynı video iki kez
+        // indirilmez ve indirme %100 olduktan sonra eski hata durumu gösterilmez.
+        selectedVideo = null
+        previewVideo = null
+        playPreview = false
+        videoDurationMs = 0L
+        clipRange = 0f..0f
+        transcriptText = ""
+        transcript = null
+        analysisError = null
+        analysisState = AnalysisState.Analyzing
+        generatedClips = emptyList()
+        batchExportState = BatchExportState.Exporting(0, 1)
+        analysisProgress = 0f
+        analysisStatus = "İşlem başlatılıyor..."
+        youtubeDownloadState = YouTubeDownloadState.Downloading(0)
+
+        context.getSharedPreferences(
+            ClipProcessingService.PREFS,
+            android.content.Context.MODE_PRIVATE
+        ).edit().clear().apply()
+
+        // URL'yi doğrudan servise ver. Service, URL'den indirip analiz eder
+        // ve Short'u üretir.
+        ClipProcessingService.start(
+            context = context,
+            videoUri = Uri.parse(sharedYoutubeUrl),
+            youtubeUrl = sharedYoutubeUrl.trim()
+        )
+    }
 
     LaunchedEffect(autoProcessYoutube, selectedVideo, sharedYoutubeUrl) {
         if (!autoProcessYoutube || selectedVideo == null) return@LaunchedEffect
