@@ -21,6 +21,7 @@ class ClipProcessingService : Service() {
     private data class GeneratedClipData(
         val filePath: String,
         val fileName: String,
+        val transcriptPath: String,
         val title: String,
         val description: String,
         val hashtags: String,
@@ -176,9 +177,25 @@ class ClipProcessingService : Service() {
                 reason = candidate.reason
             )
 
+            val transcriptFile = File(
+                cacheDir,
+                "short_transcript_" + (index + 1) + "_" +
+                    System.currentTimeMillis() + ".txt"
+            )
+            transcriptFile.writeText(
+                buildString {
+                    append(metadata.title)
+                    append("\n\n")
+                    append(transcriptText.trim())
+                    append("\n")
+                },
+                Charsets.UTF_8
+            )
+
             generated += GeneratedClipData(
                 filePath = file.absolutePath,
                 fileName = file.name,
+                transcriptPath = transcriptFile.absolutePath,
                 title = metadata.title,
                 description = metadata.description,
                 hashtags = metadata.hashtags.joinToString("|"),
@@ -214,6 +231,7 @@ class ClipProcessingService : Service() {
             editor
                 .putString("filePath_" + index, clip.filePath)
                 .putString("fileName_" + index, clip.fileName)
+                .putString("transcriptPath_" + index, clip.transcriptPath)
                 .putString("title_" + index, clip.title)
                 .putString("description_" + index, clip.description)
                 .putString("hashtags_" + index, clip.hashtags)
