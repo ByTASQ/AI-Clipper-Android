@@ -32,15 +32,24 @@ jobs:
           SDK_ROOT="$ANDROID_SDK_ROOT"
           test -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           test -d "$SDK_ROOT/platforms"
+
           if [ ! -f "$SDK_ROOT/platforms/android-37/android.jar" ]; then
             test -f "$SDK_ROOT/platforms/android-37.0/android.jar"
-            ln -sfn android-37.0 "$SDK_ROOT/platforms/android-37"
+            rm -rf "$SDK_ROOT/platforms/android-37"
+            cp -a "$SDK_ROOT/platforms/android-37.0" "$SDK_ROOT/platforms/android-37"
+
+            if [ -f "$SDK_ROOT/platforms/android-37/source.properties" ]; then
+              sed -i 's#^Pkg.Path=.*#Pkg.Path=platforms;android-37#'                 "$SDK_ROOT/platforms/android-37/source.properties"
+            fi
           fi
+
+          test ! -L "$SDK_ROOT/platforms/android-37"
           test -f "$SDK_ROOT/platforms/android-37/android.jar"
           test -d "$SDK_ROOT/build-tools/35.0.0"
           echo "Android SDK: $SDK_ROOT"
           find "$SDK_ROOT/platforms" -maxdepth 1 -type d -name 'android-37*' -print
-          ls -l "$SDK_ROOT/platforms"/android-37/android.jar
+          grep -E '^Pkg.Path=|^Pkg.Revision=' "$SDK_ROOT/platforms/android-37/source.properties" || true
+          ls -l "$SDK_ROOT/platforms/android-37/android.jar"
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -90,10 +99,10 @@ jobs:
 
       - name: Build signed release APK
         env:
-          ANDROID_KEYSTORE_PATH: ${gh} runner.temp }}/release.keystore
-          ANDROID_KEYSTORE_PASSWORD: ${gh} secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${gh} secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${gh} secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon assembleRelease
 
       - name: Upload APK
