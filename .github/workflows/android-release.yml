@@ -59,7 +59,11 @@ jobs:
           curl -fL --retry 3 --retry-delay 2 \\
             "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip" \\
             -o "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip"
-          unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d .runanywhere-maven
+          unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d "${RUNNER_TEMP}/runanywhere-maven"
+          test -d "${RUNNER_TEMP}/runanywhere-maven/repository"
+          cp -R "${RUNNER_TEMP}/runanywhere-maven/repository" .runanywhere-maven/
+          echo "RunAnywhere repository contents:"
+          find ".runanywhere-maven/repository/io/github/sanchitmonga22" -maxdepth 3 -type f | sort | head -80
           test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-sdk/0.20.37/runanywhere-sdk-0.20.37.pom"
           test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-llamacpp/0.20.37/runanywhere-llamacpp-0.20.37.pom"
 
