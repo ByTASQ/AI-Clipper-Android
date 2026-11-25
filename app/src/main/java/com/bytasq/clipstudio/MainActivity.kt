@@ -300,8 +300,17 @@ private fun VideoPreview(uri: Uri) {
 
 
 private fun normalizeYoutubeUrl(value: String): String {
-    return value.trim()
+    var result = value.trim()
         .removeSurrounding("\"")
         .removeSurrounding("'")
         .trim()
+
+    // Bazı paylaşım panoları ilk karakteri düşürebiliyor.
+    // Yalnızca açıkça youtu.be alan adı olduğu anlaşılan "outu.be" durumunu düzelt.
+    result = result.replace(
+        Regex("^https?://(?:www\\.)?outu\\.be/", RegexOption.IGNORE_CASE),
+        "https://youtu.be/"
+    )
+
+    return result
 }
