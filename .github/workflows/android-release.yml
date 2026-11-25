@@ -48,7 +48,7 @@ jobs:
           test -d "$PLATFORM_DIR/android-37"
           test ! -L "$PLATFORM_DIR/android-37"
           test -f "$PLATFORM_DIR/android-37/source.properties"
-          grep -q '^Pkg.Path=platforms;android-37
+          grep -Fq "Pkg.Path=platforms;android-37" "$PLATFORM_DIR/android-37/source.properties"
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
