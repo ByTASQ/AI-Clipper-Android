@@ -144,6 +144,8 @@ dependencies {
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.17.2")
+    implementation("io.github.sanchitmonga22:runanywhere-sdk:0.20.37")
+    implementation("io.github.sanchitmonga22:runanywhere-llamacpp:0.20.37")
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
