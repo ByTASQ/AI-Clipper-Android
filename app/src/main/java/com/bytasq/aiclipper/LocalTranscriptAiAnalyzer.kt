@@ -7,6 +7,8 @@ import com.runanywhere.sdk.public.api.InferenceFramework
 import com.runanywhere.sdk.public.api.LlmOptions
 import com.runanywhere.sdk.public.api.ModelCategory
 import com.runanywhere.sdk.public.api.ModelRegistration
+import com.runanywhere.sdk.public.api.llm
+import com.runanywhere.sdk.public.api.models
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -44,7 +46,7 @@ class LocalTranscriptAiAnalyzer(
         onProgress(78, "Yapay zekâ konu devamlarını kontrol ediyor...")
         topics = mergeByAi(topics, source)
         onProgress(92, "Konu sınırları doğrulanıyor...")
-        validate(topics, source)
+        return@withContext validate(topics, source)
     }
 
     private suspend fun ensureModel() {
