@@ -120,16 +120,36 @@ class ClipProcessingService : Service() {
             0.52f,
             "Video analiz ediliyor... " + validTranscriptSegments + " konuşma bölümü bulundu."
         )
-        val result = LocalClipAnalysisEngine { percent, status ->
+        val aiTopics = LocalTranscriptAiAnalyzer(this) { percent, status ->
             val progress = 0.52f + (percent / 100f) * 0.13f
             updateState("PROCESSING", progress, status)
         }.analyze(transcript)
 
-        val candidates = result.candidates
-            .filter { candidate ->
-                candidate.segments.any { it.endMs > it.startMs }
+        if (aiTopics.isEmpty()) {
+            throw IllegalStateException(
+                "Yapay zekâ transkripti analiz etti ancak tamamlanmış bir konu bölümü çıkaramadı."
+            )
+        }
+
+        // Her AI konusu ayrı bir Short'tur. Süre sabit değildir; konu sınırlarından gelir.
+        val candidates = aiTopics.mapIndexed { index, topic ->
+            val firstSegment = transcript.segments.firstOrNull {
+                it.endMs > topic.startMs && it.startMs < topic.endMs
             }
-            .sortedBy { it.startMs }
+            AiClipCandidate(
+                startMs = topic.startMs,
+                endMs = topic.endMs,
+                score = 90 - index.coerceAtMost(20),
+                hook = firstSegment?.text?.take(160).orEmpty(),
+                reason = topic.reason.ifBlank {
+                    "Yapay zekâ tarafından tamamlanmış bağımsız konu olarak belirlendi."
+                },
+                suggestedTitle = topic.title,
+                segments = listOf(ClipSegment(topic.startMs, topic.endMs))
+            )
+        }.filter {
+            it.endMs - it.startMs >= 5_000L
+        }.sortedBy { it.startMs }
 
         if (candidates.isEmpty()) {
             throw IllegalStateException(
