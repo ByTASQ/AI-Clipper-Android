@@ -27,18 +27,20 @@ jobs:
         with:
           packages: "platform-tools platforms;android-37.0 build-tools;35.0.0"
 
-      - name: Verify Android SDK 37
+      - name: Normalize Android API 37 platform path
         shell: bash
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT"
-          echo "sdkmanager=$(command -v sdkmanager)"
-          sdkmanager --list_installed | sed -n '1,120p'
-          test -d "$SDK_ROOT/platforms/android-37.0"
-          test -f "$SDK_ROOT/platforms/android-37.0/source.properties"
-          echo "Android API 37 platform is ready:"
-          cat "$SDK_ROOT/platforms/android-37.0/source.properties"
+          PLATFORM_DIR="$SDK_ROOT/platforms"
+          if [ ! -d "$PLATFORM_DIR/android-37" ] && [ -d "$PLATFORM_DIR/android-37.0" ]; then
+            ln -s "android-37.0" "$PLATFORM_DIR/android-37"
+          fi
+          test -d "$PLATFORM_DIR/android-37"
+          test -f "$PLATFORM_DIR/android-37/source.properties"
+          echo "Gradle Android API 37 path:"
+          readlink -f "$PLATFORM_DIR/android-37"
+          cat "$PLATFORM_DIR/android-37/source.properties"
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -87,8 +89,6 @@ jobs:
           unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d "${RUNNER_TEMP}/runanywhere-maven"
           test -d "${RUNNER_TEMP}/runanywhere-maven/repository"
           cp -R "${RUNNER_TEMP}/runanywhere-maven/repository" .runanywhere-maven/
-          echo "RunAnywhere repository contents:"
-          find ".runanywhere-maven/repository/io/github/sanchitmonga22" -maxdepth 3 -type f | sort | head -80
           test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-sdk/0.20.37/runanywhere-sdk-0.20.37.pom"
           test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-llamacpp/0.20.37/runanywhere-llamacpp-0.20.37.pom"
 
