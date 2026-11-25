@@ -49,9 +49,24 @@ class ClipProcessingService : Service() {
             try {
                 process(uri, youtubeUrl)
             } catch (e: Exception) {
-                updateState("FAILED", 0f, e.message ?: "Video hazırlanamadı.")
+                val message = e.message?.takeIf { it.isNotBlank() }
+                    ?: e.javaClass.simpleName
+                    ?: "Video hazırlanamadı."
+                updateState(
+                    "FAILED",
+                    getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                        .getFloat("progress", 0f),
+                    message
+                )
+                updateNotification("İşlem başarısız: " + message.take(180), 0)
             } finally {
-                stopForeground(STOP_FOREGROUND_REMOVE)
+                val failed = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .getString("state", "") == "FAILED"
+                if (failed) {
+                    stopForeground(STOP_FOREGROUND_DETACH)
+                } else {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                }
                 stopSelf(startId)
             }
         }
