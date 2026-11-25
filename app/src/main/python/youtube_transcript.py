@@ -13,24 +13,19 @@ def _video_id(value):
         r"(?:youtube\.com/shorts/)([A-Za-z0-9_-]{11})",
         r"(?:youtube\.com/embed/)([A-Za-z0-9_-]{11})",
     ]
-
     for pattern in patterns:
         match = re.search(pattern, value)
         if match:
             return match.group(1)
-
     return None
 
-
-def fetch(url_or_video_id, languages=None):
+def fetch(url_or_video_id):
     video_id = _video_id(url_or_video_id)
     if not video_id:
         raise RuntimeError("YouTube video kimliği alınamadı.")
 
-    languages = languages or ["tr", "tr-TR", "en", "en-US"]
-
     api = YouTubeTranscriptApi()
-
+    languages = ["tr", "tr-TR", "en", "en-US"]
     try:
         transcript = api.fetch(video_id, languages=languages)
         items = transcript.to_raw_data()
@@ -44,12 +39,12 @@ def fetch(url_or_video_id, languages=None):
         duration = float(item.get("duration", 0.0))
         if text and duration > 0:
             result.append({
-                "start": start,
-                "end": start + duration,
+                "startMs": int(start * 1000),
+                "endMs": int((start + duration) * 1000),
                 "text": text
             })
 
     if not result:
-        raise RuntimeError("YouTube için kullanılabilir altyazı bulunamadı.")
+        raise RuntimeError("Kullanılabilir YouTube altyazısı bulunamadı.")
 
     return json.dumps(result, ensure_ascii=False)
