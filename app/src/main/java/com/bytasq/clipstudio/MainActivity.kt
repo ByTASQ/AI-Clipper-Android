@@ -301,7 +301,7 @@ private fun VideoPreview(uri: Uri) {
 
 private fun normalizeYoutubeUrl(value: String): String {
     return value.trim()
-        .removeSurrounding("\\"", "\\"")
+        .removeSurrounding("\"")
         .removeSurrounding("'")
         .trim()
 }
