@@ -30,7 +30,15 @@ def _hook(progress_file):
             _write_progress(progress_file, "merging", 99, "Ses ve görüntü birleştiriliyor...")
     return callback
 
+def normalize_url(url):
+    value = (url or "").strip().strip("\\\"").strip("'")
+    value = re.sub(r"^https?://(?:www\\.)?outu\\.be/", "https://youtu.be/", value, flags=re.I)
+    if not re.match(r"^https?://", value, re.I):
+        value = "https://" + value
+    return value
+
 def download(url, output_dir, job_id):
+    url = normalize_url(url)
     if not re.match(r"^https?://(?:(?:www\.)?youtube\.com|youtu\.be)/", url, re.I):
         raise RuntimeError("Geçerli bir YouTube bağlantısı girilmedi.")
 
@@ -47,6 +55,7 @@ def download(url, output_dir, job_id):
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         "retries": 3,
         "fragment_retries": 3,
         "concurrent_fragment_downloads": 2,

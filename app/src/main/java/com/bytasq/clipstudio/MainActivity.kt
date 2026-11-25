@@ -155,6 +155,7 @@ private fun ClipStudioScreen(initialUrl: String) {
                 Button(
                     onClick = {
                         val clean = normalizeYoutubeUrl(url)
+                        url = clean
                         if (isYoutubeUrl(clean)) {
                             resultPath = ""
                             resultTitle = ""
