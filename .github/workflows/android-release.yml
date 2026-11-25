@@ -33,22 +33,30 @@ jobs:
           test -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           test -d "$SDK_ROOT/platforms"
 
+          # The runner currently ships Android 37 as android-37.0.
+          # Gradle/AGP requires the exact platforms;android-37 package path.
+          # Make a real standalone SDK package and remove the conflicting
+          # android-37.0 package so the SDK locator cannot reject it.
           if [ ! -f "$SDK_ROOT/platforms/android-37/android.jar" ]; then
             test -f "$SDK_ROOT/platforms/android-37.0/android.jar"
             rm -rf "$SDK_ROOT/platforms/android-37"
             cp -a "$SDK_ROOT/platforms/android-37.0" "$SDK_ROOT/platforms/android-37"
-
-            if [ -f "$SDK_ROOT/platforms/android-37/source.properties" ]; then
-              sed -i 's#^Pkg.Path=.*#Pkg.Path=platforms;android-37#'                 "$SDK_ROOT/platforms/android-37/source.properties"
-            fi
           fi
+
+          cat > "$SDK_ROOT/platforms/android-37/source.properties" <<'EOF'
+Pkg.Desc=Android SDK Platform 37
+Pkg.Revision=2
+Pkg.Path=platforms;android-37
+EOF
+
+          rm -rf "$SDK_ROOT/platforms/android-37.0"
 
           test ! -L "$SDK_ROOT/platforms/android-37"
           test -f "$SDK_ROOT/platforms/android-37/android.jar"
           test -d "$SDK_ROOT/build-tools/35.0.0"
           echo "Android SDK: $SDK_ROOT"
           find "$SDK_ROOT/platforms" -maxdepth 1 -type d -name 'android-37*' -print
-          grep -E '^Pkg.Path=|^Pkg.Revision=' "$SDK_ROOT/platforms/android-37/source.properties" || true
+          grep -E '^Pkg.Path=|^Pkg.Revision=' "$SDK_ROOT/platforms/android-37/source.properties"
           ls -l "$SDK_ROOT/platforms/android-37/android.jar"
 
       - name: Set up Python 3.11
@@ -81,7 +89,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/release.keystore"
-          keytool -list -v -keystore "$RUNNER_TEMP/release.keystore"             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
+          keytool -list -v -keystore "$RUNNER_TEMP/release.keystore" \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
             grep -E "Alias name:|SHA1:|SHA-1:"
 
       - name: Prepare RunAnywhere Kotlin Maven repository
@@ -90,7 +100,9 @@ jobs:
           set -euo pipefail
           rm -rf .runanywhere-maven
           mkdir -p .runanywhere-maven
-          curl -fL --retry 3 --retry-delay 2             "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip"             -o "$RUNNER_TEMP/runanywhere-kotlin-maven.zip"
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip" \
+            -o "$RUNNER_TEMP/runanywhere-kotlin-maven.zip"
           unzip -q "$RUNNER_TEMP/runanywhere-kotlin-maven.zip" -d "$RUNNER_TEMP/runanywhere-maven"
           test -d "$RUNNER_TEMP/runanywhere-maven/repository"
           cp -R "$RUNNER_TEMP/runanywhere-maven/repository" .runanywhere-maven/
