@@ -33,10 +33,7 @@ jobs:
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
           PLATFORM_DIR="$SDK_ROOT/platforms"
-          # AGP compileSdk=37 resolves the canonical android-37 directory.
-          # The runner installs the API 37 platform as android-37.0, and a
-          # symlink is rejected by SDK package-location validation. Normalize
-          # it to a real directory and update its package path metadata.
+
           if [ -d "$PLATFORM_DIR/android-37.0" ]; then
             if [ -e "$PLATFORM_DIR/android-37" ] || [ -L "$PLATFORM_DIR/android-37" ]; then
               rm -rf "$PLATFORM_DIR/android-37"
@@ -45,76 +42,13 @@ jobs:
             sed -i 's/^Pkg.Path=platforms;android-37.0$/Pkg.Path=platforms;android-37/' \
               "$PLATFORM_DIR/android-37/source.properties"
           fi
+
           test -d "$PLATFORM_DIR/android-37"
           test ! -L "$PLATFORM_DIR/android-37"
           test -f "$PLATFORM_DIR/android-37/source.properties"
           grep -Fq "Pkg.Path=platforms;android-37" "$PLATFORM_DIR/android-37/source.properties"
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.11.1"
-
-      - name: Prepare current yt-dlp wheel
-        run: |
-          set -euo pipefail
-          mkdir -p app/src/main/assets/ytdlp
-          python3 -m pip download --no-deps --only-binary=:all: yt-dlp==2026.10.26 -d "${RUNNER_TEMP}/ytdlp"
-          test -f "${RUNNER_TEMP}/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl"
-          cp "${RUNNER_TEMP}/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl" app/src/main/assets/ytdlp/
-
-      - name: Check signing secrets
-        run: |
-          test -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" || (echo "ANDROID_KEYSTORE_BASE64 secret is missing" && exit 1)
-          test -n "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" || (echo "ANDROID_KEYSTORE_PASSWORD secret is missing" && exit 1)
-          test -n "${{ secrets.ANDROID_KEY_ALIAS }}" || (echo "ANDROID_KEY_ALIAS secret is missing" && exit 1)
-          test -n "${{ secrets.ANDROID_KEY_PASSWORD }}" || (echo "ANDROID_KEY_PASSWORD secret is missing" && exit 1)
-
-      - name: Decode release keystore and show SHA-1
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${RUNNER_TEMP}/release.keystore"
-          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore" \
-            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
-            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
-            grep -E "Alias name:|SHA1:|SHA-1:"
-
-      - name: Prepare RunAnywhere Kotlin Maven repository
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf .runanywhere-maven
-          mkdir -p .runanywhere-maven
-          curl -fL --retry 3 --retry-delay 2 \
-            "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip" \
-            -o "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip"
-          unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d "${RUNNER_TEMP}/runanywhere-maven"
-          test -d "${RUNNER_TEMP}/runanywhere-maven/repository"
-          cp -R "${RUNNER_TEMP}/runanywhere-maven/repository" .runanywhere-maven/
-          test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-sdk/0.20.37/runanywhere-sdk-0.20.37.pom"
-          test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-llamacpp/0.20.37/runanywhere-llamacpp-0.20.37.pom"
-
-      - name: Build signed release APK
-        env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: gradle --no-daemon assembleRelease
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-clipper-release
-          path: app/build/outputs/apk/release/*.apk
- "$PLATFORM_DIR/android-37/source.properties"
-          echo "Gradle Android API 37 path:"
+          echo "Android API 37 platform:"
           readlink -f "$PLATFORM_DIR/android-37"
           cat "$PLATFORM_DIR/android-37/source.properties"
 
