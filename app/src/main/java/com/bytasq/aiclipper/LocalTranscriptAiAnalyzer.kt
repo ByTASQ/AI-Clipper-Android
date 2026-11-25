@@ -265,14 +265,8 @@ $list
     }
 
     private fun fallback(source: List<TranscriptSegment>): List<AiTopic> {
-        if (source.isEmpty()) return emptyList()
-        return listOf(
-            AiTopic(
-                source.first().startMs,
-                source.last().endMs,
-                "Video konusu",
-                "Yerel LLM yanıtı alınamadı; kaynak konuşma aralığı korundu."
-            )
+        throw IllegalStateException(
+            "Yerel yapay zekâ geçerli konu sınırları üretemedi."
         )
     }
 
