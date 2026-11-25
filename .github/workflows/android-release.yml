@@ -56,8 +56,8 @@ jobs:
         run: |
           rm -rf .runanywhere-maven
           mkdir -p .runanywhere-maven
-          curl -fL --retry 3 --retry-delay 2 \\
-            "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip" \\
+          curl -fL --retry 3 --retry-delay 2 \
+            "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip" \
             -o "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip"
           unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d "${RUNNER_TEMP}/runanywhere-maven"
           test -d "${RUNNER_TEMP}/runanywhere-maven/repository"
