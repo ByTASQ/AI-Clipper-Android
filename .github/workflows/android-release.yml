@@ -22,17 +22,23 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Verify preinstalled Android SDK 37
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools platforms;android-37 build-tools;35.0.0"
+
+      - name: Verify Android SDK 37
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
-          test -d "$SDK_ROOT/platforms/android-37"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT"
-          echo "Android 37 platform is available:"
+          echo "sdkmanager=$(command -v sdkmanager)"
+          sdkmanager --list_installed | sed -n '1,120p'
+          test -d "$SDK_ROOT/platforms/android-37"
+          test -f "$SDK_ROOT/platforms/android-37/source.properties"
+          echo "Android 37 platform is ready."
           cat "$SDK_ROOT/platforms/android-37/source.properties"
-          echo "Installed Android platforms:"
-          ls -1 "$SDK_ROOT/platforms" | tail -20
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -46,8 +52,10 @@ jobs:
 
       - name: Prepare current yt-dlp wheel
         run: |
+          set -euo pipefail
           mkdir -p app/src/main/assets/ytdlp
           python3 -m pip download --no-deps --only-binary=:all: yt-dlp==2026.10.26 -d "${RUNNER_TEMP}/ytdlp"
+          test -f "${RUNNER_TEMP}/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl"
           cp "${RUNNER_TEMP}/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl" app/src/main/assets/ytdlp/
 
       - name: Check signing secrets
@@ -60,12 +68,17 @@ jobs:
       - name: Decode release keystore and show SHA-1
         shell: bash
         run: |
+          set -euo pipefail
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${RUNNER_TEMP}/release.keystore"
-          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore"             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
+          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore" \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
             grep -E "Alias name:|SHA1:|SHA-1:"
 
       - name: Prepare RunAnywhere Kotlin Maven repository
+        shell: bash
         run: |
+          set -euo pipefail
           rm -rf .runanywhere-maven
           mkdir -p .runanywhere-maven
           curl -fL --retry 3 --retry-delay 2 \
