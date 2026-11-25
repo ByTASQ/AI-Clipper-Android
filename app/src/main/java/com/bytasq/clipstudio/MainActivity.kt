@@ -154,7 +154,7 @@ private fun ClipStudioScreen(initialUrl: String) {
 
                 Button(
                     onClick = {
-                        val clean = url.trim()
+                        val clean = normalizeYoutubeUrl(url)
                         if (isYoutubeUrl(clean)) {
                             resultPath = ""
                             resultTitle = ""
@@ -296,4 +296,12 @@ private fun VideoPreview(uri: Uri) {
             .fillMaxWidth()
             .height(430.dp)
     )
+}
+
+
+private fun normalizeYoutubeUrl(value: String): String {
+    return value.trim()
+        .removeSurrounding("\\"", "\\"")
+        .removeSurrounding("'")
+        .trim()
 }
