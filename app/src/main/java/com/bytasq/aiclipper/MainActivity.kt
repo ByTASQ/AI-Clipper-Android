@@ -241,6 +241,7 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                             GeneratedClip(
                                 fileName = prefs.getString("fileName_" + index, File(path).name).orEmpty(),
                                 filePath = path,
+                                transcriptPath = prefs.getString("transcriptPath_" + index, "").orEmpty(),
                                 title = prefs.getString("title_" + index, "AI Short").orEmpty(),
                                 description = prefs.getString("description_" + index, "").orEmpty(),
                                 hashtags = prefs.getString("hashtags_" + index, "")
@@ -569,6 +570,25 @@ private fun AIClipperApp(initialYoutubeUrl: String? = null) {
                                 ) {
                                     Text("Onayla ve Paylaş")
                                 }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { downloadTranscript(context, clip) },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Transkripti İndir")
+                                    }
+
+                                    OutlinedButton(
+                                        onClick = { shareTranscript(context, clip) },
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Text("Transkripti Paylaş")
+                                    }
+                                }
                             }
                         }
                     }
@@ -653,9 +673,68 @@ private data class ClipCandidate(
     )
 )
 
+private fun downloadTranscript(
+    context: android.content.Context,
+    clip: GeneratedClip
+) {
+    val source = File(clip.transcriptPath)
+    if (!source.isFile) return
+
+    try {
+        val resolver = context.contentResolver
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, source.name)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain")
+            put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            values
+        ) ?: return
+
+        resolver.openOutputStream(uri)?.use { output ->
+            source.inputStream().use { input -> input.copyTo(output) }
+        }
+
+        values.clear()
+        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        android.widget.Toast.makeText(
+            context,
+            "Transkript indirildi.",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(
+            context,
+            "Transkript indirilemedi: " + (e.message ?: "Bilinmeyen hata"),
+            android.widget.Toast.LENGTH_LONG
+        ).show()
+    }
+}
+
+private fun shareTranscript(
+    context: android.content.Context,
+    clip: GeneratedClip
+) {
+    val source = File(clip.transcriptPath)
+    if (!source.isFile) return
+
+    val text = source.readText(Charsets.UTF_8)
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_SUBJECT, clip.title + " - Transkript")
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(
+        android.content.Intent.createChooser(intent, "Transkripti paylaş")
+    )
+}
+
 private data class GeneratedClip(
     val fileName: String,
     val filePath: String,
+    val transcriptPath: String = "",
     val title: String,
     val description: String,
     val hashtags: List<String>,
