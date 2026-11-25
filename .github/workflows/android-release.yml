@@ -52,6 +52,17 @@ jobs:
           keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore"             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
             grep -E "Alias name:|SHA1:|SHA-1:"
 
+      - name: Prepare RunAnywhere Kotlin Maven repository
+        run: |
+          rm -rf .runanywhere-maven
+          mkdir -p .runanywhere-maven
+          curl -fL --retry 3 --retry-delay 2 \\
+            "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip" \\
+            -o "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip"
+          unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d .runanywhere-maven
+          test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-sdk/0.20.37/runanywhere-sdk-0.20.37.pom"
+          test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-llamacpp/0.20.37/runanywhere-llamacpp-0.20.37.pom"
+
       - name: Build signed release APK
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
