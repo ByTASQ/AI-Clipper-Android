@@ -9,8 +9,8 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
+        maven { url = uri("${rootDir}/.runanywhere-maven/repository") }
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
     }
 }
 rootProject.name = "AI-Clipper-Android"
