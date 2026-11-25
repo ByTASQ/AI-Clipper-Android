@@ -79,15 +79,71 @@ class LocalClipAnalysisEngine(
                 continue
             }
 
-            var start = segment.startMs
-            while (start < segment.endMs) {
-                val end = minOf(start + maxWindowMs, segment.endMs)
-                result += TranscriptSegment(
-                    startMs = start,
-                    endMs = end,
-                    text = segment.text
-                )
-                start = end
+            /*
+             * Bazı kaynaklarda bütün video tek bir transcript segmenti olarak
+             * geliyor. Eski yaklaşım aynı metni 24 saniyelik her pencereye
+             * tekrar yazıyordu:
+             *
+             *   00:00-00:24 -> TÜM TRANSKRİPT
+             *   00:24-00:48 -> TÜM TRANSKRİPT
+             *   00:48-01:12 -> TÜM TRANSKRİPT
+             *
+             * Bu, analiz motorunun bütün pencereleri aynı konu sanmasına ve
+             * gerçek aday üretilemeyince 24 saniyelik fallback seçmesine yol
+             * açıyordu.
+             *
+             * Metni de zaman aralığına orantılı bölüyoruz. Böylece her pencere
+             * kendi kelimelerini taşır ve konu/sonuç analizi gerçek sıraya
+             * göre yapılabilir.
+             */
+            val words = segment.text
+                .replace(Regex("\s+"), " ")
+                .trim()
+                .split(" ")
+                .filter { it.isNotBlank() }
+
+            if (words.isEmpty()) {
+                var start = segment.startMs
+                while (start < segment.endMs) {
+                    val end = minOf(start + maxWindowMs, segment.endMs)
+                    result += TranscriptSegment(
+                        startMs = start,
+                        endMs = end,
+                        text = segment.text
+                    )
+                    start = end
+                }
+                continue
+            }
+
+            val windowCount =
+                ((duration + maxWindowMs - 1L) / maxWindowMs).toInt().coerceAtLeast(1)
+
+            for (index in 0 until windowCount) {
+                val start = segment.startMs +
+                    (duration * index.toLong() / windowCount.toLong())
+                val end = segment.startMs +
+                    (duration * (index + 1).toLong() / windowCount.toLong())
+
+                val wordStart =
+                    (words.size.toLong() * index / windowCount).toInt()
+                val wordEnd =
+                    (words.size.toLong() * (index + 1) / windowCount).toInt()
+
+                val windowText = words
+                    .subList(
+                        wordStart.coerceIn(0, words.size),
+                        wordEnd.coerceIn(wordStart, words.size)
+                    )
+                    .joinToString(" ")
+
+                if (windowText.isNotBlank() && end > start) {
+                    result += TranscriptSegment(
+                        startMs = start,
+                        endMs = end,
+                        text = windowText
+                    )
+                }
             }
         }
 
