@@ -67,7 +67,7 @@ chaquopy {
         buildPython("python3.11")
         version = "3.11"
         pip {
-            install("src/main/assets/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl")
+            install("yt-dlp==2026.10.26")
             install("youtube-transcript-api==1.2.3")
         }
     }
