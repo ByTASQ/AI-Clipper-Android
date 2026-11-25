@@ -58,9 +58,6 @@ jobs:
             echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
           fi
 
-      - name: Build debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
-
       - name: Build release APK
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
@@ -69,10 +66,8 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon --stacktrace assembleRelease
 
-      - name: Upload APKs
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ai-clip-studio-apks
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            app/build/outputs/apk/release/*.apk
+          name: ai-clip-studio-release
+          path: app/build/outputs/apk/release/*.apk
