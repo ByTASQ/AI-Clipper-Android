@@ -310,13 +310,23 @@ class LocalClipAnalysisEngine(
             // Çok kısa ve düşük bilgi taşıyan blokları ayrı video yapma.
             if (maxScore < 45 || topicDuration < 8_000L) return@forEachIndexed
 
-            val best = group.maxByOrNull { it.score } ?: return@forEachIndexed
-            val completeUnits = expandForTopicCompleteness(best, group)
-            if (completeUnits.isEmpty()) return@forEachIndexed
-
-            val selected = completeUnits
+            /*
+             * KRİTİK: Bir topic grubunda "en iyi 24 saniyeyi" seçmiyoruz.
+             * Topic block zaten konu sınırlarıyla oluşturuldu. Bu nedenle
+             * grubun tamamı konuya ait anlatım olarak alınır.
+             *
+             * Böylece:
+             *   Konu 1 = 01:20-02:45  -> 1:25'lik Short
+             *   Konu 2 = 02:45-04:10  -> 1:25'lik Short
+             *
+             * Konu 02:45'te bitiyorsa orada durur; 24 saniye dolduğu için
+             * kesinlikle ortadan kesilmez.
+             */
+            val selected = group
                 .sortedBy { it.segments.first().startMs }
                 .toMutableList()
+
+            if (selected.isEmpty()) return@forEachIndexed
 
             val clipSegments = mergeNearby(
                 selected.flatMap { it.segments }
@@ -324,7 +334,7 @@ class LocalClipAnalysisEngine(
             )
 
             val duration = clipSegments.sumOf { it.endMs - it.startMs }
-            if (duration <= 0L || duration > 180_000L) return@forEachIndexed
+            if (duration <= 0L) return@forEachIndexed
 
             val topicText = selected.joinToString(" ") {
                 it.segments.joinToString(" ") { segment -> segment.text }
@@ -335,15 +345,15 @@ class LocalClipAnalysisEngine(
 
             val flow = detectInformationFlowState(topicText)
             val completenessBonus = when {
-                flow.isComplete -> 14
-                hasConclusion -> 10
-                else -> 0
+                flow.isComplete -> 18
+                hasConclusion -> 14
+                else -> 6
             }
 
             val score = (
                 selected.map { it.score }.average() +
                     completenessBonus +
-                    min(selected.size * 2, 10)
+                    min(selected.size * 2, 12)
                 ).toInt().coerceIn(45, 99)
 
             val hook = selected.first().segments.first().text.take(130)
@@ -354,9 +364,9 @@ class LocalClipAnalysisEngine(
                 score = score,
                 hook = hook,
                 reason = if (hasConclusion || flow.isComplete) {
-                    "Bu konu bağımsız olarak özetlendi; anlatımın gerekli bölümleri ve sonucu korunarak ayrı Short hazırlandı."
+                    "Konu sınırı korunarak anlatımın tamamı ayrı Short olarak hazırlandı."
                 } else {
-                    "Bu konu bağımsız olarak seçildi; gereksiz tekrarlar çıkarılarak konu bütünlüğü korunacak şekilde Short hazırlandı."
+                    "Konu sınırı korunarak bu konunun tamamı ayrı Short olarak hazırlandı."
                 },
                 suggestedTitle = buildTitle(hook),
                 segments = clipSegments
@@ -458,10 +468,9 @@ class LocalClipAnalysisEngine(
             val unitDuration = unit.durationMs
             if (unitDuration <= 0L) return false
 
-            // 180 seconds is only a safety ceiling. There is no artificial
-            // 60/120 second target. The summary naturally determines the
-            // final duration.
-            if (duration + unitDuration > 180_000L) return false
+            // Topic-based video duration is determined by topic completion.
+            // There is no 60/120/180 second target here.
+            if (duration + unitDuration <= 0L) return false
 
             selected[unit.id] = unit
             duration += unitDuration
