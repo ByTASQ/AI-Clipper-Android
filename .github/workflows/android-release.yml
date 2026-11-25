@@ -35,19 +35,13 @@ jobs:
 
           # The runner currently ships Android 37 as android-37.0.
           # Gradle/AGP requires the exact platforms;android-37 package path.
-          # Make a real standalone SDK package and remove the conflicting
-          # android-37.0 package so the SDK locator cannot reject it.
           if [ ! -f "$SDK_ROOT/platforms/android-37/android.jar" ]; then
             test -f "$SDK_ROOT/platforms/android-37.0/android.jar"
             rm -rf "$SDK_ROOT/platforms/android-37"
             cp -a "$SDK_ROOT/platforms/android-37.0" "$SDK_ROOT/platforms/android-37"
           fi
 
-          cat > "$SDK_ROOT/platforms/android-37/source.properties" <<'EOF'
-Pkg.Desc=Android SDK Platform 37
-Pkg.Revision=2
-Pkg.Path=platforms;android-37
-EOF
+          printf '%s\n'             'Pkg.Desc=Android SDK Platform 37'             'Pkg.Revision=2'             'Pkg.Path=platforms;android-37'             > "$SDK_ROOT/platforms/android-37/source.properties"
 
           rm -rf "$SDK_ROOT/platforms/android-37.0"
 
