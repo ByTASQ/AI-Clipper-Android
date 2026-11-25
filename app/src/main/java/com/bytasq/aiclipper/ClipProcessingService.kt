@@ -120,10 +120,29 @@ class ClipProcessingService : Service() {
             0.52f,
             "Video analiz ediliyor... " + validTranscriptSegments + " konuşma bölümü bulundu."
         )
-        val aiTopics = LocalTranscriptAiAnalyzer(this) { percent, status ->
-            val progress = 0.52f + (percent / 100f) * 0.13f
-            updateState("PROCESSING", progress, status)
-        }.analyze(transcript)
+        val aiTopics = try {
+            LocalTranscriptAiAnalyzer(this) { percent, status ->
+                val progress = 0.52f + (percent / 100f) * 0.13f
+                updateState("PROCESSING", progress, status)
+            }.analyze(transcript)
+        } catch (e: Exception) {
+            updateState(
+                "PROCESSING",
+                0.64f,
+                "Yerel yapay zekâ konu sınırı üretemedi; güvenli yedek analiz çalıştırılıyor..."
+            )
+            LocalClipAnalysisEngine { percent, status ->
+                val progress = 0.64f + (percent / 100f) * 0.01f
+                updateState("PROCESSING", progress, status)
+            }.analyze(transcript).candidates.map { candidate ->
+                LocalTranscriptAiAnalyzer.AiTopic(
+                    candidate.startMs,
+                    candidate.endMs,
+                    candidate.suggestedTitle,
+                    "Yedek analiz: " + candidate.reason
+                )
+            }
+        }
 
         if (aiTopics.isEmpty()) {
             throw IllegalStateException(
