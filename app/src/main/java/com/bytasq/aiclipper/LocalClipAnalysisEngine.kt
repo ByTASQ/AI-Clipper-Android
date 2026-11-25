@@ -97,7 +97,7 @@ class LocalClipAnalysisEngine(
              * göre yapılabilir.
              */
             val words = segment.text
-                .replace(Regex("\s+"), " ")
+                .replace(Regex("\\s+"), " ")
                 .trim()
                 .split(" ")
                 .filter { it.isNotBlank() }
