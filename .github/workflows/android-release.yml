@@ -32,11 +32,15 @@ jobs:
           SDK_ROOT="$ANDROID_SDK_ROOT"
           test -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           test -d "$SDK_ROOT/platforms"
-          test -f "$SDK_ROOT/platforms/android-37/android.jar" ||             test -f "$SDK_ROOT/platforms/android-37.0/android.jar"
+          if [ ! -f "$SDK_ROOT/platforms/android-37/android.jar" ]; then
+            test -f "$SDK_ROOT/platforms/android-37.0/android.jar"
+            ln -sfn android-37.0 "$SDK_ROOT/platforms/android-37"
+          fi
+          test -f "$SDK_ROOT/platforms/android-37/android.jar"
           test -d "$SDK_ROOT/build-tools/35.0.0"
           echo "Android SDK: $SDK_ROOT"
           find "$SDK_ROOT/platforms" -maxdepth 1 -type d -name 'android-37*' -print
-          ls -l "$SDK_ROOT/platforms"/android-37*/android.jar
+          ls -l "$SDK_ROOT/platforms"/android-37/android.jar
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
