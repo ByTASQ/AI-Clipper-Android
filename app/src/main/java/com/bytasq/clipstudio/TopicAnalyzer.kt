@@ -121,7 +121,7 @@ object TopicAnalyzer {
 
     private fun score(group: List<TranscriptLine>, text: String): Int {
         val duration = group.last().endMs - group.first().startMs
-        val words = text.split(Regex("\s+")).count { it.isNotBlank() }
+        val words = text.split(Regex("""\\s+""")).count { it.isNotBlank() }
         val density = words.toDouble() / max(1.0, duration / 60_000.0)
         var score = 45
         if (duration in 35_000L..100_000L) score += 20
@@ -133,7 +133,7 @@ object TopicAnalyzer {
 
     private fun makeTitle(text: String, index: Int): String {
         val sentence = text
-            .replace(Regex("\s+"), " ")
+            .replace(Regex("""\\s+"""), " ")
             .trim()
             .split(Regex("""(?<=[.!?])\\s+"""))
             .firstOrNull()
