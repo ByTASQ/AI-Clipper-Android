@@ -10,7 +10,7 @@ on:
 
 jobs:
   build-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -22,22 +22,17 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Android SDK 37
+      - name: Verify preinstalled Android SDK 37
         shell: bash
         run: |
           set -e
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
-          test -n "$SDK_ROOT"
-          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -1)"
-          fi
-          test -x "$SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" --channel=1 --install "platforms;android-37"
           test -d "$SDK_ROOT/platforms/android-37"
           echo "ANDROID_SDK_ROOT=$SDK_ROOT"
-          ls -la "$SDK_ROOT/platforms/android-37"
+          echo "Android 37 platform is available:"
+          cat "$SDK_ROOT/platforms/android-37/source.properties"
+          echo "Installed Android platforms:"
+          ls -1 "$SDK_ROOT/platforms" | tail -20
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
