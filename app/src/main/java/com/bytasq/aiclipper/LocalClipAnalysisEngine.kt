@@ -661,7 +661,7 @@ class LocalClipAnalysisEngine(
         var i = bestIndex - 1
         var backwardSteps = 0
 
-        while (i >= 0 && backwardSteps < 4) {
+        while (i >= 0 && backwardSteps < 6) {
             val previous = topicGroup[i]
             if (!shouldIncludeContext(previous, reference)) break
 
@@ -675,25 +675,61 @@ class LocalClipAnalysisEngine(
         // tamamla. Bir sonuç cümlesi bulunduğunda konu tamamlanmış kabul edilir.
         reference = best
         i = bestIndex + 1
-        var forwardSteps = 0
         var completionFound = false
+        var forwardIncluded = 0
 
-        while (i < topicGroup.size && forwardSteps < 5) {
+        while (i < topicGroup.size) {
             val next = topicGroup[i]
             val text = textOf(next)
-            val includeContext = shouldIncludeContext(next, reference)
-            val includeForInformationFlow = shouldContinueForInformationFlow(selected.values, next)
 
-            if (!includeContext && !includeForInformationFlow && !hasConclusionSignal(text)) break
+            /*
+             * Konu grubunun sonraki üniteleri aynı konuya ait olduğu için
+             * sırf "informationGain" düştü diye anlatımı kesme. Özellikle
+             * sonuç cümlesi bir sonraki 20-24 saniyelik ünitedeyse eski kod
+             * konuyu tam ortasında bırakabiliyordu.
+             */
+            val includeContext = shouldIncludeContext(next, reference)
+            val includeForInformationFlow =
+                shouldContinueForInformationFlow(selected.values, next)
+            val explicitConclusion = hasConclusionSignal(text) ||
+                isNaturalEnding(next.segments.last().text)
+
+            if (
+                !includeContext &&
+                !includeForInformationFlow &&
+                !explicitConclusion &&
+                forwardIncluded > 0
+            ) {
+                // Aynı topic block içindeyiz; ilk devam ünitesini koru.
+                // İkinci ve sonraki ünitelerde düşük benzerlik varsa konu
+                // zaten doğal olarak bitmiş olabilir.
+                val nextSimilarity = similarity(next, reference)
+                if (nextSimilarity < 0.05) break
+            }
 
             selected[next.id] = next
             reference = next
-            forwardSteps++
+            forwardIncluded++
 
-            val flow = informationState(selected.values)
-            if (hasConclusionSignal(text) || (flow.isComplete && flow.informationGain >= 0.18)) {
+            if (hasConclusionSignal(text)) {
                 completionFound = true
                 break
+            }
+
+            /*
+             * En az bir devam ünitesi seçilmeden "complete" durumuna göre
+             * kesme yapma. Bir konu tek 24s üniteyse zaten tamamdır; birden
+             * fazla ünite varsa sonraki anlatımı da dinle.
+             */
+            if (forwardIncluded >= 1) {
+                val flow = informationState(selected.values)
+                if (flow.isComplete &&
+                    (isNaturalEnding(next.segments.last().text) ||
+                        informationRole(text) == InformationRole.RESULT)
+                ) {
+                    completionFound = true
+                    break
+                }
             }
 
             i++
@@ -1200,10 +1236,22 @@ class LocalClipAnalysisEngine(
         // 25+ saniyelik bloklarda aynı konunun farklı kelimelerle anlatılması
         // normaldir; bu yüzden kısa cümlelerde daha toleranslıyız.
         val currentDuration = current.last().endMs - current.first().startMs
+
+        /*
+         * 24 saniyelik bir özet ünitesi tek başına yeni konu değildir.
+         * Eski eşikler kısa blokları gereğinden fazla bölüyordu ve sonuçta
+         * konunun yalnızca ilk 20-24 saniyesi Short'a girebiliyordu.
+         *
+         * 35 saniyeye kadar yalnızca açık bir konu geçişi varsa böl.
+         * Daha uzun bloklarda düşük kelime örtüşmesi + düşük kapsam birlikte
+         * gerçek konu değişimi sinyali olarak kullanılır.
+         */
+        if (currentDuration < 35_000L) return false
+
         val hardBreak = when {
             currentDuration >= 90_000L ->
                 jaccard < 0.045 && nextCoverage < 0.18
-            currentDuration >= 45_000L ->
+            currentDuration >= 60_000L ->
                 jaccard < 0.035 && nextCoverage < 0.15
             else ->
                 jaccard < 0.025 && nextCoverage < 0.12
