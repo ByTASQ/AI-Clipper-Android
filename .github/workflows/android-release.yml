@@ -11,6 +11,9 @@ on:
 jobs:
   build-release:
     runs-on: ubuntu-24.04
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout
@@ -22,32 +25,18 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: "platform-tools platforms;android-37 build-tools;35.0.0"
-
-      - name: Verify Android API 37
+      - name: Verify preinstalled Android SDK
         shell: bash
         run: |
           set -euo pipefail
-          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
-          PLATFORM_DIR="$SDK_ROOT/platforms"
-
-          if [ ! -d "$PLATFORM_DIR/android-37" ] && [ -d "$PLATFORM_DIR/android-37.0" ]; then
-            mv "$PLATFORM_DIR/android-37.0" "$PLATFORM_DIR/android-37"
-          fi
-
-          test -d "$PLATFORM_DIR/android-37"
-          test -f "$PLATFORM_DIR/android-37/android.jar"
-
-          if grep -q '^Pkg.Path=' "$PLATFORM_DIR/android-37/source.properties"; then
-            sed -i 's/^Pkg.Path=.*/Pkg.Path=platforms;android-37/' "$PLATFORM_DIR/android-37/source.properties"
-          fi
-
-          echo "Android API 37:"
-          readlink -f "$PLATFORM_DIR/android-37"
-          grep '^Pkg.Path=' "$PLATFORM_DIR/android-37/source.properties" || true
+          SDK_ROOT="$ANDROID_SDK_ROOT"
+          test -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          test -d "$SDK_ROOT/platforms"
+          test -f "$SDK_ROOT/platforms/android-37/android.jar" ||             test -f "$SDK_ROOT/platforms/android-37.0/android.jar"
+          test -d "$SDK_ROOT/build-tools/35.0.0"
+          echo "Android SDK: $SDK_ROOT"
+          find "$SDK_ROOT/platforms" -maxdepth 1 -type d -name 'android-37*' -print
+          ls -l "$SDK_ROOT/platforms"/android-37*/android.jar
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -63,9 +52,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p app/src/main/assets/ytdlp
-          python3 -m pip download --no-deps --only-binary=:all: yt-dlp==2026.10.26 -d "${RUNNER_TEMP}/ytdlp"
-          test -f "${RUNNER_TEMP}/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl"
-          cp "${RUNNER_TEMP}/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl" app/src/main/assets/ytdlp/
+          python3 -m pip download --no-deps --only-binary=:all: yt-dlp==2026.10.26 -d "$RUNNER_TEMP/ytdlp"
+          test -f "$RUNNER_TEMP/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl"
+          cp "$RUNNER_TEMP/ytdlp/yt_dlp-2026.10.26-py3-none-any.whl" app/src/main/assets/ytdlp/
 
       - name: Check signing secrets
         run: |
@@ -78,8 +67,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${RUNNER_TEMP}/release.keystore"
-          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore"             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+          keytool -list -v -keystore "$RUNNER_TEMP/release.keystore"             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
             grep -E "Alias name:|SHA1:|SHA-1:"
 
       - name: Prepare RunAnywhere Kotlin Maven repository
@@ -88,19 +77,19 @@ jobs:
           set -euo pipefail
           rm -rf .runanywhere-maven
           mkdir -p .runanywhere-maven
-          curl -fL --retry 3 --retry-delay 2             "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip"             -o "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip"
-          unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d "${RUNNER_TEMP}/runanywhere-maven"
-          test -d "${RUNNER_TEMP}/runanywhere-maven/repository"
-          cp -R "${RUNNER_TEMP}/runanywhere-maven/repository" .runanywhere-maven/
+          curl -fL --retry 3 --retry-delay 2             "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip"             -o "$RUNNER_TEMP/runanywhere-kotlin-maven.zip"
+          unzip -q "$RUNNER_TEMP/runanywhere-kotlin-maven.zip" -d "$RUNNER_TEMP/runanywhere-maven"
+          test -d "$RUNNER_TEMP/runanywhere-maven/repository"
+          cp -R "$RUNNER_TEMP/runanywhere-maven/repository" .runanywhere-maven/
           test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-sdk/0.20.37/runanywhere-sdk-0.20.37.pom"
           test -f ".runanywhere-maven/repository/io/github/sanchitmonga22/runanywhere-llamacpp/0.20.37/runanywhere-llamacpp-0.20.37.pom"
 
       - name: Build signed release APK
         env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PATH: ${gh} runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${gh} secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${gh} secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${gh} secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon assembleRelease
 
       - name: Upload APK
