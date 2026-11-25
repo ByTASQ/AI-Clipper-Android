@@ -25,32 +25,29 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: "platform-tools platforms;android-37.0 build-tools;35.0.0"
+          packages: "platform-tools platforms;android-37 build-tools;35.0.0"
 
-      - name: Normalize Android API 37 platform path
+      - name: Verify Android API 37
         shell: bash
         run: |
           set -euo pipefail
           SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
           PLATFORM_DIR="$SDK_ROOT/platforms"
 
-          if [ -d "$PLATFORM_DIR/android-37.0" ]; then
-            if [ -e "$PLATFORM_DIR/android-37" ] || [ -L "$PLATFORM_DIR/android-37" ]; then
-              rm -rf "$PLATFORM_DIR/android-37"
-            fi
+          if [ ! -d "$PLATFORM_DIR/android-37" ] && [ -d "$PLATFORM_DIR/android-37.0" ]; then
             mv "$PLATFORM_DIR/android-37.0" "$PLATFORM_DIR/android-37"
-            sed -i 's/^Pkg.Path=platforms;android-37.0$/Pkg.Path=platforms;android-37/' \
-              "$PLATFORM_DIR/android-37/source.properties"
           fi
 
           test -d "$PLATFORM_DIR/android-37"
-          test ! -L "$PLATFORM_DIR/android-37"
-          test -f "$PLATFORM_DIR/android-37/source.properties"
-          grep -Fq "Pkg.Path=platforms;android-37" "$PLATFORM_DIR/android-37/source.properties"
+          test -f "$PLATFORM_DIR/android-37/android.jar"
 
-          echo "Android API 37 platform:"
+          if grep -q '^Pkg.Path=' "$PLATFORM_DIR/android-37/source.properties"; then
+            sed -i 's/^Pkg.Path=.*/Pkg.Path=platforms;android-37/' "$PLATFORM_DIR/android-37/source.properties"
+          fi
+
+          echo "Android API 37:"
           readlink -f "$PLATFORM_DIR/android-37"
-          cat "$PLATFORM_DIR/android-37/source.properties"
+          grep '^Pkg.Path=' "$PLATFORM_DIR/android-37/source.properties" || true
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -82,9 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "${RUNNER_TEMP}/release.keystore"
-          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore" \
-            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
-            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
+          keytool -list -v -keystore "${RUNNER_TEMP}/release.keystore"             -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" |
             grep -E "Alias name:|SHA1:|SHA-1:"
 
       - name: Prepare RunAnywhere Kotlin Maven repository
@@ -93,9 +88,7 @@ jobs:
           set -euo pipefail
           rm -rf .runanywhere-maven
           mkdir -p .runanywhere-maven
-          curl -fL --retry 3 --retry-delay 2 \
-            "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip" \
-            -o "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip"
+          curl -fL --retry 3 --retry-delay 2             "https://github.com/RunanywhereAI/runanywhere-sdks/releases/download/v0.20.37/runanywhere-kotlin-maven-v0.20.37.zip"             -o "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip"
           unzip -q "${RUNNER_TEMP}/runanywhere-kotlin-maven.zip" -d "${RUNNER_TEMP}/runanywhere-maven"
           test -d "${RUNNER_TEMP}/runanywhere-maven/repository"
           cp -R "${RUNNER_TEMP}/runanywhere-maven/repository" .runanywhere-maven/
