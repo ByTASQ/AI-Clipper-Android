@@ -96,11 +96,11 @@ object TopicAnalyzer {
     }
 
     private fun clean(value: String): String =
-        value.replace(Regex("\s+"), " ").trim()
+        value.replace(Regex("""\\s+"""), " ").trim()
 
     private fun tokens(value: String): Set<String> =
         value.lowercase()
-            .split(Regex("[^\p{L}\p{N}]+"))
+            .split(Regex("""[^\\p{L}\\p{N}]+"""))
             .filter { it.length >= 3 }
             .toSet()
 
@@ -135,7 +135,7 @@ object TopicAnalyzer {
         val sentence = text
             .replace(Regex("\s+"), " ")
             .trim()
-            .split(Regex("(?<=[.!?])\s+"))
+            .split(Regex("""(?<=[.!?])\\s+"""))
             .firstOrNull()
             ?.take(90)
             .orEmpty()
